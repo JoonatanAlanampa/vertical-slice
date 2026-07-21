@@ -244,12 +244,65 @@ ring-enabling test under `GATES=yes`, and `ro_meas` gates the ring
 enables with `rst` so an unresolved FSM state cannot light a ring in a
 netlist that has no delays to damp it.
 
-What that leaves for silicon-adjacent confidence, in increasing cost:
-the read-out path is fully GL-tested with the rings dark; an
-SDF-annotated GL run would give a real (if pessimistically modelled)
-frequency; and the number that actually settles the question is the die.
-An SDF run against our own `own.lib` timing is worth doing once in phase
-4 precisely because it is the last prediction before silicon.
+What that leaves for silicon-adjacent confidence: the read-out path is
+fully GL-tested with the rings dark, and the rings themselves are timed by
+the SDF-annotated run below.
+
+#### The prediction — GREEN (2026-07-21)
+
+The all-own netlist, post-P&R SDF back-annotated, running the real read-out
+protocol. This is the last prediction that exists before the die, and it is
+what bring-up compares against:
+
+| ring | stage t_plh / t_phl | period | f_ring | count (short window) |
+|---|---|---|---|---|
+| INV (30x INV_X1 + 1 NAND2) | 42.5 / 32.8 ps | 2.259 ns | **442.7 MHz** | **283** |
+| NAND2 (31x NAND2_X1) | 44.6 / 45.2 ps | 2.784 ns | **359.2 MHz** | **230** |
+| NOR2 (31x NOR2_X1) | 92.2 / 35.7 ps | 3.967 ns | **252.1 MHz** | **161** |
+
+`flow/ring_prediction.py` computes those from the SDF; `test/run_gl_own.py`
+simulates the netlist, and the instrument reports **283 / 230 / 161** — the
+predictions exactly, through the prescaler, the synchronizer, the window
+counter and the byte mux. Ordering INV > NAND2 > NOR2, the physically
+sensible one: a NOR2's series PMOS stack makes it slowest, and its 92 ps
+rise against 36 ps fall is that asymmetry, measured.
+
+**The read-out design survives real frequencies.** The prescaler was sized
+for a ~320 MHz ring; the fastest is 443 MHz, so the divided rate is
+1.73 MHz against a 25 MHz sample clock — inside the f_clk/4 the crossing
+needs. The long window gives 41k-72k counts, comfortably inside 24 bits.
+
+Three things this phase caught that RTL simulation could not:
+
+1. **`-gspecify` is not optional.** Without it icarus silently discards
+   every `specify` block, skips `$sdf_annotate` and runs at zero delay —
+   which for a ring means spinning forever at a single timestamp. It ate
+   22 GB before being killed. `run_gl_own.py` now compiles a throwaway copy
+   first purely to read the warnings, and refuses to run if annotation
+   would be dropped.
+2. **Icarus cannot annotate a flat netlist's escaped names.** OpenROAD
+   emits the old hierarchy path as ONE escaped identifier; icarus splits it
+   on the divider, looks for a scope that does not exist, and leaves the
+   cell unannotated — silently, so the run *looks* fine while reporting the
+   cell models' default delays. Brackets break it the same way (read as an
+   array index). `flow/sdf_sanitize.py` rewrites netlist and SDF together
+   so no name contains a dot or a bracket.
+3. **The prediction script was wrong, and the simulation proved it.** Its
+   first version averaged both NAND2 arcs, but only `A -> Y` is in the loop
+   (`B` is the enable leg, tied to its inactive constant). That skewed the
+   NAND2 ring by 31 % and put the flavors in the wrong order. Two
+   independent paths to the same number is what caught it; either one alone
+   would have shipped a confident wrong prediction to bring-up.
+
+**Known limitation, and it belongs to the library rather than this chip:
+`own.lib` is characterized at a single PVT** (`tt`, 1.8 V, 25 C). Ask the
+flow for ss or ff and the nominal numbers come back — all nine SDF corners
+here are byte-identical. So these predictions carry **no corner spread**:
+silicon will land somewhere on a PVT curve nobody has characterized, and a
+measured-vs-predicted gap cannot be attributed until it is. That is a
+stdcells item for a future release, not a blocker here — 10.5 ns of setup
+slack at a 20 ns clock absorbs any plausible ss derate, and the ship clock
+is 25 MHz regardless.
 
 ### Phase 5 — submission
 Next TT shuttle after TTSKY26c. Ship with a bring-up script (MicroPython

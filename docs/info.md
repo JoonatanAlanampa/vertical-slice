@@ -75,6 +75,19 @@ blinks, the level bar waves, and `uo[7]` plays 440 Hz through an RC
 low-pass (1 kOhm + 100 nF) or the TT Audio Pmod. Sweep `ui[6:0]` to walk
 the frequency table; `uo[6]` gives the scope a trigger.
 
+**What the counts should be.** Our own timing model, back-annotated onto
+the placed-and-routed netlist, predicts (short window, 25 MHz clock):
+
+| ring | predicted f | predicted count |
+|---|---|---|
+| INV | 442.7 MHz | 283 |
+| NAND2 | 359.2 MHz | 230 |
+| NOR2 | 252.1 MHz | 161 |
+
+Multiply by 256 for the long window. A silicon reading that disagrees is
+not a bug to be fixed — it is the result this chip exists to produce, and
+the differences *between* flavors say which modelling stage to look at.
+
 **Test-structure mode.** Set `ui[7]` and `ui[1:0] = 01`, raise `ui[4]`,
 wait past the window (164 us on the short setting), then read the three
 count bytes through `ui[3:2]`. Repeat for `ui[1:0] = 10` and `11`. Three
