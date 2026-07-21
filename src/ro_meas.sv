@@ -18,9 +18,13 @@
 //     one ring is ever enabled, and the disabled ones settle to a static
 //     level, so the mux never glitches during a measurement; `sel` is
 //     only ever changed with the FSM idle.
-//   * the prescaler runs in the ring's own domain with an ASYNC reset —
-//     it has no clock at all while its ring is off, so a synchronous
-//     reset could never clear it.
+//   * the prescaler runs in the ring's own domain and is cleared DURING
+//     WARM-UP, not by `rst`. It has no clock at all while its ring is
+//     off, so a reset synchronous to it could never take effect — but
+//     the warm-up window is precisely when the ring IS running, so that
+//     is where the clear belongs. (The library's DFF_X1 has no reset
+//     pin at all, which settles the question: an async-reset flop is not
+//     something this chip can be built out of.)
 //   * the prescaler's MSB crosses into the system clock domain through a
 //     three-stage synchronizer; only its rising edges are counted, which
 //     is why the prescaler must divide the ring below f_clk/4.
@@ -90,16 +94,29 @@ module ro_meas #(
     endcase
   end
 
+  // Cleared throughout WARM (the ring is running then, by construction), so
+  // every measurement starts from a known phase. The clear is released one
+  // ring cycle either side of the window opening — that race costs at most
+  // the same +-1 count the edge quantisation already costs.
+  wire pre_clr = (st == S_WARM);
+
   logic [PRE_BITS-1:0] pre;
-  always_ff @(posedge ro_clk or posedge rst)
-    if (rst) pre <= '0;
-    else     pre <= pre + 1'b1;
+  always_ff @(posedge ro_clk)
+    if (pre_clr) pre <= '0;
+    else         pre <= pre + 1'b1;
 
   // --------------------------------------- crossing into the system clock
+  // Masked outside the measurement window. The prescaler has no reset (see
+  // above), so before its first warm-up its bits are whatever the flops
+  // powered up as — random in silicon, X in simulation, and either way not
+  // something to route to an output pin. Inside S_MEAS it is defined by
+  // construction, because WARM just cleared it.
+  wire div_raw = (st == S_MEAS) && pre[PRE_BITS-1];
+
   logic [2:0] sync;
   always_ff @(posedge clk)
     if (rst) sync <= 3'b000;
-    else     sync <= {sync[1:0], pre[PRE_BITS-1]};
+    else     sync <= {sync[1:0], div_raw};
 
   wire div_edge = sync[1] & ~sync[2];
   assign div_live = sync[2];

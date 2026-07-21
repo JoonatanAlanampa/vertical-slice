@@ -164,19 +164,46 @@ This is the fallback that guarantees a submittable chip if the all-own
 hardening runs out of road before the deadline, and it is the A/B
 partner for the PPA table.
 
-### Phase 3 — all-own hardening
-Port `stdcells/flow/make_hardening.py` here against the pinned release:
-elaborate-only synthesis, `dfflibmap` to `own_hardening.lib`, ABC against
-the combinational-only copy, then LibreLane with `own.lib` / `own.lef`.
-Carry over the hard-won configuration from that repo — core margins
-1/1/2/2, hold slack margins 0.005, density ~85, the `heal_hvtp.py` pass,
-signoff by the official KLayout deck in-container — and the lessons that
-produced them.
+### Phase 3 — all-own hardening (IN PROGRESS, library pinned at lib-v1.0)
+`tools/fetch_lib.py` pulls the release by tag into `lib/` and checks every
+artifact against the committed `lib.lock`; `flow/make_hardening.py` builds
+the netlist locally and commits it, so CI does place-and-route only and
+cannot re-decide the logic. `harden/config.json` + the `harden` workflow
+carry stdcells' hard-won settings verbatim (core margins 1/1/2/2, hold
+margins 0.005, density 85, `EXTRA_EXCLUDED_CELLS: sky130_fd_sc_hd__*`,
+`heal_hvtp.py`, KLayout-deck signoff in-container).
 
-Open question to settle here: the ring oscillators are a combinational
-loop, which OpenSTA will report as a broken timing arc and OpenROAD's CTS
-must be told to ignore. The STA exceptions belong in the hardening
-config, not in the RTL.
+**The netlist is all-own and audited — 2804 cells, zero `sky130_` content
+of any kind, tie cells included** (lib-v1.0's `TIE_X1` is what made that
+reachable; the earlier hybrid still used foundry ties):
+
+| cell | count | area µm² |
+|---|---|---|
+| NAND2_X1 | 1089 | 4088 |
+| NOR2_X1 | 904 | 3393 |
+| INV_X1 | 347 | 1303 |
+| DFF_X1 | 274 | 4457 |
+| BUF_X2 | 112 | 561 |
+| TIE_X1 | 78 | 293 |
+| **total** | **2804** | **14 094** |
+
+That is **83.4 % of a 1x1 core before CTS, hold fixing and fill** — so a
+1x1 is an experiment worth running, not a foregone conclusion (stdcells'
+all-own CORDIC-1 routed at 87.4 % once). `harden/config.json` therefore
+tries 1x1 first; if placement or routing dies, the fallback is the 1x2
+line in that file, and this is the number to revisit.
+
+The library also **changed the RTL**, which is the honest cost of building
+on cells you designed yourself: `DFF_X1` has no reset pin, so the
+ring-domain prescaler could not keep its async reset. It is now cleared
+during warm-up (when the ring is, by construction, running) and its MSB is
+masked outside the measurement window so an un-cleared power-up state
+cannot reach a pin. Side benefit: the start phase is deterministic, and
+the three rings now read identical counts instead of differing by one.
+
+Open question still to settle: the rings are a combinational loop, which
+OpenSTA reports as a broken timing arc and CTS must be told to ignore. The
+STA exceptions belong in the hardening config, not in the RTL.
 
 ### Phase 4 — gate-level verification
 Re-run `test/` against the post-layout netlist (the `gl_test` job already

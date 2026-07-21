@@ -1,0 +1,12 @@
+{
+  "repo": "JoonatanAlanampa/stdcells",
+  "tag": "lib-v1.0",
+  "files": {
+    "flow/heal_hvtp.py": "3f07eef0954cb1b199eebf43c8d4c513c2a105beeea9637192872693e37df054",
+    "out/own.lef": "3818f94b849817f4f320105627864dbc7ee30f7a9e1b43c8a2496488fa8cb536",
+    "out/own.lib": "9ebe1d1872c3cda0bf99ca3c266a808b4c81b3f770b2a39d26c143be18205f9d",
+    "out/own_abc.lib": "9d123634b805f7643682c61c0ea04957bef3c5a845ef2daf14e6c6ce2fc47751",
+    "out/own_cells.gds": "f771fe4d6553e57fb583344459671d47df3cae8c744d78aa30b29dac4db02de1",
+    "out/own_hardening.lib": "6e822532d2a034669ad6c7b97434fd6306153ef53b8a14f539fedef76fd32c09"
+  }
+}

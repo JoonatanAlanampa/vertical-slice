@@ -82,9 +82,12 @@ counts, three cell delays. Compare them against `own.lib`, against the
 DEVSIM device model, and against the OpenSTA signoff numbers — that
 comparison is the reason the chip exists.
 
-`ui[3:2] = 11` also puts the prescaled ring on `uo[6]` (`ring_alive`), so
-a scope or a frequency counter can read the ring directly, independent of
-the digital read-out path.
+`ui[3:2] = 11` also puts the prescaled ring on `uo[6]` (`ring_alive`)
+while a measurement is running, so a scope or a frequency counter can
+read the ring directly, independent of the digital read-out path. Hold
+RUN high and it toggles continuously. Outside a measurement it reads 0 —
+the prescaler has no reset (the cell library has no flop with one), so
+its bits are only meaningful after the warm-up that clears them.
 
 ## External hardware
 

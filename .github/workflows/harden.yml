@@ -1,0 +1,134 @@
+name: harden
+
+# Place & route THIS chip out of the pinned stdcells release, with zero
+# foundry cells. Synthesis is not here on purpose — flow/make_hardening.py
+# ran it locally and committed harden/vslice_gates.v, so CI cannot quietly
+# re-decide what the logic is.
+
+on:
+  push:
+    paths:
+      - "harden/**"
+      - "lib.lock"
+      - "flow/make_hardening.py"
+      - ".github/workflows/harden.yml"
+  workflow_dispatch:
+
+jobs:
+  pnr:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Fetch the pinned cell library
+        run: python tools/fetch_lib.py     # verifies every sha256 in lib.lock
+
+      - name: Cache sky130 PDK
+        uses: actions/cache@v4
+        with:
+          path: pdk-root
+          key: pdk-sky130-${{ runner.os }}-v1
+
+      # JS actions cannot run inside the nix-based librelane container (the
+      # runner-injected node binary fails to exec there), so the image is
+      # used via explicit docker run rather than `container:`.
+      - name: Place & route on the own library
+        run: |
+          mkdir -p pdk-root
+          docker run --rm \
+            -v "$PWD":/work -w /work \
+            -e PDK_ROOT=/work/pdk-root \
+            ghcr.io/librelane/librelane:3.0.5 \
+            librelane harden/config.json
+
+      - name: Zero-foundry audit of the placed netlist
+        run: |
+          sudo chown -R "$USER" harden/runs || true
+          python3 - << 'EOF'
+          import glob, re, sys
+          nl = sorted(glob.glob("harden/runs/*/final/nl/*.nl.v"))
+          if not nl:
+              sys.exit("no final netlist found")
+          text = open(nl[-1]).read()
+          hits = sorted(set(re.findall(r"\bsky130_\w+", text)))
+          print(f"checked {nl[-1]}")
+          if hits:
+              print("FOUND FOUNDRY CELLS:", *hits, sep="\n  ")
+              sys.exit("zero-foundry claim broken — see PLAN.md")
+          # and the rings must still be 3 x 31 stages of the right flavors
+          rings = {}
+          for cell, inst in re.findall(r"^\s*(\w+)\s+(\S*u_stage\S*)\s*\(", text, re.M):
+              rings[cell] = rings.get(cell, 0) + 1
+          want = {"INV_X1": 30, "NAND2_X1": 32, "NOR2_X1": 31}
+          print("ring stages:", rings)
+          if rings != want:
+              sys.exit(f"ring stages changed during P&R: {rings} != {want}")
+          print("zero-foundry: OK   rings: OK")
+          EOF
+
+      - name: hvtp corner healing + KLayout signoff DRC
+        run: |
+          sudo chown -R "$USER" harden/runs || true
+          GDS=$(ls harden/runs/*/final/gds/*.gds | sort | tail -1)
+          RUNDIR=$(dirname "$(dirname "$(dirname "$GDS")")")
+          docker run --rm \
+            -v "$PWD":/work -w /work \
+            -e PDK_ROOT=/work/pdk-root \
+            --entrypoint bash \
+            ghcr.io/librelane/librelane:3.0.5 \
+            -c "set -e
+                klayout -b -r lib/heal_hvtp.py \
+                  -rd input=$GDS -rd output=$RUNDIR/final/gds/healed.gds
+                DECK=\$(find /work/pdk-root -name sky130A_mr.drc | head -1)
+                test -n \"\$DECK\" || { echo 'sky130A_mr.drc not in PDK'; exit 1; }
+                echo \"deck: \$DECK\"
+                klayout -b -r \"\$DECK\" \
+                  -rd input=/work/$RUNDIR/final/gds/healed.gds \
+                  -rd report=/work/$RUNDIR/final/signoff_drc.lyrdb \
+                  -rd feol=true -rd beol=true -rd offgrid=true"
+          python3 - "$RUNDIR/final/signoff_drc.lyrdb" << 'EOF'
+          import sys, xml.etree.ElementTree as ET
+          from collections import Counter
+          items = ET.parse(sys.argv[1]).getroot().findall(".//item")
+          cats = Counter(i.findtext("category", "").strip("'") for i in items)
+          print(f"signoff DRC violations: {len(items)}")
+          for c, n in cats.most_common():
+              print(f"  {c}: {n}")
+          sys.exit(1 if items else 0)
+          EOF
+
+      - name: Report metrics
+        if: always()
+        run: |
+          sudo chown -R "$USER" harden/runs || true
+          python3 - << 'EOF'
+          import glob, json, os
+          runs = sorted(glob.glob("harden/runs/*/final/metrics.json"))
+          if not runs:
+              print("no metrics.json found"); raise SystemExit(0)
+          m = json.load(open(runs[-1]))
+          keys = [k for k in m if any(s in k for s in
+                  ("design__instance", "utilization", "die__area",
+                   "core__area", "timing__setup__ws", "timing__hold__ws",
+                   "clock__skew", "route__wirelength", "antenna",
+                   "power__total"))]
+          out = "\n".join(["# All-own hardening metrics", ""] +
+                          [f"- `{k}`: {m[k]}" for k in sorted(keys)])
+          print(out)
+          with open(os.environ.get("GITHUB_STEP_SUMMARY", "/dev/null"), "a") as f:
+              f.write(out + "\n")
+          EOF
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hardening-run
+          path: |
+            harden/runs/*/final
+            harden/runs/*/error.log
+          if-no-files-found: warn

@@ -15,3 +15,7 @@ test/gate_level_netlist.v
 # the standard-cell library arrives as a pinned stdcells release, and is
 # never committed here — see PLAN.md ("Library consumption: pinned")
 lib/
+harden/runs/
+harden/*.ys
+harden/*.log
+pdk-root/

@@ -1,0 +1,67 @@
+{
+  "//": "ALL-OWN hardening: this chip placed and routed out of the pinned",
+  "//": "stdcells release (lib.lock), with zero foundry cells of any kind.",
+  "//": "Ported from stdcells harden/config.json at tag lib-v1.0 — the",
+  "//": "settings below are that repo's hard-won ones, not fresh guesses.",
+
+  "DESIGN_NAME": "tt_um_joonatanalanampa_vslice",
+  "VERILOG_FILES": ["dir::vslice_gates.v"],
+
+  "//": "Synthesis already happened in flow/make_hardening.py; CI does P&R",
+  "//": "only, so the netlist that gets audited is the netlist that ships.",
+  "SYNTH_ELABORATE_ONLY": true,
+  "RUN_LINTER": false,
+  "ERROR_ON_NL_ASSIGN_STATEMENTS": false,
+
+  "CLOCK_PORT": "clk",
+  "CLOCK_PERIOD": 20,
+
+  "EXTRA_LIBS": ["dir::../lib/own_hardening.lib"],
+  "EXTRA_LEFS": ["dir::../lib/own.lef"],
+  "EXTRA_GDS_FILES": ["dir::../lib/own_cells.gds"],
+
+  "//": "TT 1x1 tile. The logic alone is 83.4% of a 1x1 core before CTS and",
+  "//": "hold fixing, so this is an experiment: if placement or routing dies,",
+  "//": "switch to the 1x2 line below (161.00 x 225.76) and note it in PLAN.",
+  "FP_SIZING": "absolute",
+  "DIE_AREA": "0 0 161.00 111.52",
+
+  "//": "Core margins: librelane's defaults eat ~25% of a 1x1 (site HEIGHTS",
+  "//": "of 10.9um each). 1/1/2/2 was the lever that won the stdcells 1x1.",
+  "TOP_MARGIN_MULT": 1,
+  "BOTTOM_MARGIN_MULT": 1,
+  "LEFT_MARGIN_MULT": 2,
+  "RIGHT_MARGIN_MULT": 2,
+
+  "//": "A fast library makes hold OVERFIX expensive: default margins x a",
+  "//": "171ps BUF_X2 produced 322 repair buffers = 27% of logic area and an",
+  "//": "infeasible placement. 0.005 is the measured working value.",
+  "PL_TARGET_DENSITY_PCT": 85,
+  "PL_RESIZER_HOLD_SLACK_MARGIN": 0.005,
+  "GRT_RESIZER_HOLD_SLACK_MARGIN": 0.005,
+  "GRT_ALLOW_CONGESTION": true,
+
+  "//": "THE zero-foundry lever: without this, the flow quietly inserts hd",
+  "//": "tie cells, hold buffers, CTS buffers and fill, and the claim dies.",
+  "EXTRA_EXCLUDED_CELLS": ["sky130_fd_sc_hd__*"],
+
+  "FP_WELLTAP_CELL": "WELLTAP_X1",
+  "FP_ENDCAP_CELL": "FILL_X1",
+  "FILL_CELL": ["FILL_X*"],
+  "DECAP_CELL": ["FILL_X*"],
+  "DIODE_CELL": "DIODE_X1/DIODE",
+  "CTS_CLK_BUFFERS": ["BUF_X2", "BUF_X4"],
+  "CTS_ROOT_BUFFER": "BUF_X4",
+  "CTS_MAX_SLEW": 0.75,
+  "CTS_MAX_CAP": 0.05,
+
+  "//": "Signoff is the official KLayout deck, run as its own CI step (see",
+  "//": "harden.yml). magic's CIF read of GDS-only custom cells emits tens of",
+  "//": "thousands of phantom errors, and netgen LVS rides on that same",
+  "//": "extraction — cell-level LVS was done in stdcells against the PDK deck.",
+  "RUN_KLAYOUT_XOR": false,
+  "RUN_KLAYOUT_DRC": false,
+  "ERROR_ON_MAGIC_DRC": false,
+  "ERROR_ON_ILLEGAL_OVERLAPS": false,
+  "ERROR_ON_LVS_ERROR": false
+}
