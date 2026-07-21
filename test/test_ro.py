@@ -8,8 +8,8 @@
 # modelled period (2 * STAGES * STAGE_DLY). That is deliberate: these
 # tests prove the instrument (select -> warm-up -> window -> latch ->
 # byte mux) reports the frequency it is shown. The flavors only diverge
-# once real cells carry real delays — gate-level simulation against the
-# characterized library, and then silicon.
+# once real cells carry real delays, which happens in silicon — see the
+# GL note below for why gate-level simulation is not a middle step.
 
 import os
 
@@ -17,10 +17,19 @@ import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import ClockCycles, RisingEdge
 
-# Gate-level runs replace every stage delay with the flow's UNIT_DELAY,
-# so the modelled ring frequency below does not apply — there we only
-# check that each ring runs and is counted.
+# A RING OSCILLATOR CANNOT BE GATE-LEVEL SIMULATED HERE, and running one
+# does not fail — it HANGS. sky130's FUNCTIONAL cell models are plain
+# `not`/`buf` primitives with no delay (UNIT_DELAY is only applied to the
+# sequential cells), so the ring becomes a zero-delay combinational loop
+# and the simulator spins forever at a single timestamp. Measured: a
+# gl_test job burned 2 h before it was killed.
+#
+# So under GATES the tests that enable a ring are skipped, and only the
+# paths that keep every ring dark run. Timing a ring needs delays that
+# exist in exactly two places: an SDF-annotated run, and silicon. Silicon
+# is the point of the chip.
 GL = os.environ.get("GATES") == "yes"
+NO_RINGS = cocotb.test(skip=GL)
 
 CLK_NS = 40                    # 25 MHz, the ship clock
 STAGES = 31                    # ro_ring default
@@ -101,7 +110,7 @@ async def test_ro_off(dut):
         assert await read_byte(dut, SEL_OFF, byte_sel, run=True) == 0
 
 
-@cocotb.test()
+@NO_RINGS
 async def test_ro_counts(dut):
     """Every flavor's ring is counted, and the count means what we claim."""
     await start(dut)
@@ -118,11 +127,10 @@ async def test_ro_counts(dut):
 
     # same modelled stage delay -> the three must agree to a quantisation
     # step; a real difference here would be an instrument bug, not physics
-    if not GL:
-        assert max(counts.values()) - min(counts.values()) <= 1, counts
+    assert max(counts.values()) - min(counts.values()) <= 1, counts
 
 
-@cocotb.test()
+@NO_RINGS
 async def test_readout_mux(dut):
     """The byte mux addresses the latched count, and status reports state."""
     await start(dut)
@@ -138,7 +146,7 @@ async def test_readout_mux(dut):
     assert (status & 0b0011_1100) == 0, f"status reserved bits set: {status:#04x}"
 
 
-@cocotb.test()
+@NO_RINGS
 async def test_repeat_and_mode_mux(dut):
     """run held high repeats the measurement; ui[7]=0 returns the sine."""
     await start(dut)

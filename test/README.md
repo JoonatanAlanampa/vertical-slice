@@ -22,10 +22,17 @@ lumped `STAGE_DLY`, so they oscillate at the same modelled frequency
 (2 x 31 x 0.1 ns = 6.2 ns; the tests assert ~103 prescaled edges per
 short window and that the flavors agree to within one quantisation
 step). **That equality is the instrument being correct, not physics.**
-The flavors only diverge once real cells carry real delays — and the
-delays that matter exist only in silicon, which is the point of the
-chip. Under `GATES=yes` the value assertions relax to "oscillates and is
-counted", since the flow's unit delay is not our cell delay either.
+The flavors only diverge once real cells carry real delays — and those
+exist in silicon, which is the point of the chip.
+
+Under `GATES=yes` the three ring-enabling tests are **skipped**, and only
+`test_ro_off` (which never lights a ring) runs. This is not caution, it
+is necessity: sky130's `FUNCTIONAL` cell models are plain `not`/`buf`
+primitives with no delay — `UNIT_DELAY` is applied only to the sequential
+cells — so a gate-level ring is a zero-delay combinational loop and the
+simulator spins forever at a single timestamp. Measured the hard way: a
+`gl_test` job ran 2 h before it was killed. Timing a ring needs an
+SDF-annotated run, or silicon.
 
 ## `test_sine.py` — the CORDIC-1 half
 

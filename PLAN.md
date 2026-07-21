@@ -181,9 +181,24 @@ config, not in the RTL.
 ### Phase 4 — gate-level verification
 Re-run `test/` against the post-layout netlist (the `gl_test` job already
 does this for the reference build; the all-own build needs the same job
-pointed at our Verilog models). The RO count assertions relax to
-"oscillates and is counted" at gate level, since the flow's unit delay is
-not our cell delay — the real number only exists in silicon.
+pointed at our Verilog models).
+
+**The rings are excluded from gate-level simulation, and that is not a
+shortcut.** sky130's `FUNCTIONAL` models are plain `not`/`buf` primitives
+with no delay (`UNIT_DELAY` reaches only the sequential cells), so a
+gate-level ring is a zero-delay combinational loop: the simulator does
+not fail, it *hangs* at a single timestamp. Measured — a `gl_test` job
+burned 2 h before being killed. `test_ro.py` therefore skips every
+ring-enabling test under `GATES=yes`, and `ro_meas` gates the ring
+enables with `rst` so an unresolved FSM state cannot light a ring in a
+netlist that has no delays to damp it.
+
+What that leaves for silicon-adjacent confidence, in increasing cost:
+the read-out path is fully GL-tested with the rings dark; an
+SDF-annotated GL run would give a real (if pessimistically modelled)
+frequency; and the number that actually settles the question is the die.
+An SDF run against our own `own.lib` timing is worth doing once in phase
+4 precisely because it is the last prediction before silicon.
 
 ### Phase 5 — submission
 Next TT shuttle after TTSKY26c. Ship with a bring-up script (MicroPython

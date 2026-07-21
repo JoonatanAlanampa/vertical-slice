@@ -70,9 +70,13 @@ module ro_meas #(
   wire [WIN_LONG-1:0] win_top = win_long ? {WIN_LONG{1'b1}}
                                          : {{(WIN_LONG-WIN_SHORT){1'b0}}, {WIN_SHORT{1'b1}}};
 
+  // The `rst` term is not redundant: it makes the rings provably dark
+  // whenever reset is asserted, without depending on `st` being resolved.
+  // In a zero-delay gate-level netlist an X on a ring enable is not a
+  // stale value, it is a simulator that may never converge.
   always_comb begin
     ring_en = 3'b000;
-    if (armed && sel != 2'd0) ring_en[sel - 2'd1] = 1'b1;
+    if (!rst && armed && sel != 2'd0) ring_en[sel - 2'd1] = 1'b1;
   end
 
   // ------------------------------------------- ring-domain prescaler
