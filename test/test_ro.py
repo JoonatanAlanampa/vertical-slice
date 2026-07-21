@@ -12,6 +12,8 @@
 # GL note below for why gate-level simulation is not a middle step.
 
 import os
+import sys
+from pathlib import Path
 
 import cocotb
 from cocotb.clock import Clock
@@ -29,7 +31,14 @@ from cocotb.triggers import ClockCycles, RisingEdge
 # exist in exactly two places: an SDF-annotated run, and silicon. Silicon
 # is the point of the chip.
 GL = os.environ.get("GATES") == "yes"
-NO_RINGS = cocotb.test(skip=GL)
+
+# ...unless the delays are REAL. run_gl_own.py annotates post-P&R SDF onto
+# the all-own netlist, which is the one configuration where a ring both
+# oscillates and means something: the frequency is then our own timing
+# model's prediction for silicon. There the counts are checked against that
+# prediction instead of against the RTL stand-in.
+GL_OWN = os.environ.get("GL_OWN") == "yes"
+NO_RINGS = cocotb.test(skip=GL and not GL_OWN)
 
 CLK_NS = 40                    # 25 MHz, the ship clock
 STAGES = 31                    # ro_ring default
@@ -47,6 +56,28 @@ RUN = 1 << 4
 
 SEL_OFF, SEL_INV, SEL_NAND2, SEL_NOR2 = 0, 1, 2, 3
 FLAVOR = {SEL_INV: "INV", SEL_NAND2: "NAND2", SEL_NOR2: "NOR2"}
+
+
+def sdf_prediction():
+    """Counts our own timing model expects, per ring, for a short window."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "flow"))
+    import statistics as st
+
+    from ring_prediction import COMPOSITION, parse
+
+    per = parse(Path(os.environ["SDF_PATH"]))
+    out = {}
+    for ring, comp in COMPOSITION.items():
+        period_ns = 0.0
+        for celltype, n in comp.items():
+            arcs = per.get((ring, celltype))
+            if not arcs:
+                break
+            period_ns += n * (st.mean(arcs[0]) + st.mean(arcs[1]))
+        else:
+            f_hz = 1e9 / period_ns
+            out[ring] = f_hz / 2 ** PRE * (2 ** WIN_SHORT / (1e9 / CLK_NS))
+    return out
 
 
 def ctrl(sel, byte_sel=0, run=False, win_long=False):
@@ -115,19 +146,41 @@ async def test_ro_counts(dut):
     """Every flavor's ring is counted, and the count means what we claim."""
     await start(dut)
 
+    predicted = sdf_prediction() if GL_OWN else None
+    if predicted:
+        dut._log.info("own-library prediction (counts/short window): %s",
+                      {k: round(v) for k, v in predicted.items()})
+
     counts = {}
     for sel in (SEL_INV, SEL_NAND2, SEL_NOR2):
         n = await measure(dut, sel)
         f_mhz = n * (2 ** PRE) / (WINDOW_NS * 1e-9) / 1e6
         dut._log.info("%-5s ring: count=%d  -> %.1f MHz (model %.1f MHz)",
                       FLAVOR[sel], n, f_mhz, 1e3 / RING_PERIOD_NS)
-        assert abs(n - EXPECTED) / EXPECTED < 0.05, \
-            f"{FLAVOR[sel]}: count {n}, expected ~{EXPECTED:.0f}"
+        # With SDF annotated, the yardstick is our own timing model's
+        # prediction for this flavor; in RTL it is the uniform stand-in.
+        exp = predicted[FLAVOR[sel]] if predicted else EXPECTED
+        tol = 0.10 if predicted else 0.05
+        assert abs(n - exp) / exp < tol, \
+            f"{FLAVOR[sel]}: count {n}, expected ~{exp:.0f} " \
+            f"({'own.lib prediction' if predicted else 'RTL model'})"
         counts[sel] = n
 
-    # same modelled stage delay -> the three must agree to a quantisation
-    # step; a real difference here would be an instrument bug, not physics
-    assert max(counts.values()) - min(counts.values()) <= 1, counts
+    if predicted:
+        # REAL delays: the flavors must separate, and in the order our own
+        # characterization says they do. This is the differential signal the
+        # three-ring design exists to produce.
+        order = sorted(counts, key=lambda s: -counts[s])
+        want = sorted(FLAVOR, key=lambda s: -predicted[FLAVOR[s]])
+        assert order == want, (
+            f"flavor ordering disagrees with own.lib: measured "
+            f"{[FLAVOR[s] for s in order]}, predicted {[FLAVOR[s] for s in want]}")
+        dut._log.info("flavor ordering matches own.lib: %s",
+                      " > ".join(FLAVOR[s] for s in order))
+    else:
+        # same modelled stage delay -> the three must agree to a quantisation
+        # step; a difference here would be an instrument bug, not physics
+        assert max(counts.values()) - min(counts.values()) <= 1, counts
 
 
 @NO_RINGS
