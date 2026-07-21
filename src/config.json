@@ -27,6 +27,12 @@
   "RUN_LINTER": 1,
   "LINTER_INCLUDE_PDK_MODELS": 1,
 
+  "//": "Ring-oscillator test structures: harden them out of NAMED CELLS, never",
+  "//": "out of mapped logic — a chain of 31 inverters is, to ABC, one inverter",
+  "//": "(measured). This define selects the foundry-library reference build; the",
+  "//": "all-own build defines USE_OWN_CELLS instead. See src/ro_ring.sv.",
+  "VERILOG_DEFINES": ["USE_HD_CELLS"],
+
   "//": "If you need a custom clock configuration, read the following documentation first:",
   "//": "https://tinytapeout.com/faq/#how-can-i-map-an-additional-external-clock-to-one-of-the-gpios",
   "CLOCK_PORT": "clk",

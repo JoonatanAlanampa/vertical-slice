@@ -115,14 +115,28 @@ TT template structure, top module `tt_um_joonatanalanampa_vslice`, the
 CORDIC-1 RTL vendored unchanged from the fabricated revision, the ring
 test structures, and a cocotb suite that passes on both halves.
 
-Measured on the way in, and worth keeping: **a ring oscillator does not
-survive synthesis by default.** With the ring nodes merely marked
-`(* keep *)`, yosys + ABC collapsed all three 31-stage chains to a single
-gate each — a chain of 31 inverters is, to a logic optimizer, one
-inverter. What holds is a per-stage module boundary (`ro_stage`, marked
-`keep_hierarchy`) so the optimizer never sees two stages at once. Verify
-this again after any tool-version bump; it is exactly the kind of thing
-that silently breaks a test structure into a wire.
+Two things measured on the way in, both worth keeping:
+
+**A ring oscillator does not survive synthesis by default.** With the
+ring nodes merely marked `(* keep *)`, yosys + ABC collapsed all three
+31-stage chains to a single gate each — a chain of 31 inverters is, to a
+logic optimizer, one inverter.
+
+**Per-stage `keep_hierarchy` is not the fix either.** It does stop the
+collapse (verified: 31 stages survive), but LibreLane then dies with
+`3 Unmapped Yosys instances found` / `ABC: Error: The network is
+combinational` — ABC will not map a kept, purely combinational
+submodule. The fix that works is also the one a test structure wants on
+its merits: **instantiate cells by name** (`ro_stage` under
+`` `USE_HD_CELLS `` / `` `USE_OWN_CELLS ``). A liberty cell instance is
+opaque to yosys, so the ring survives flatten, constant propagation and
+ABC with no attributes at all — and, more importantly, we know exactly
+which cell the frequency measured. A "NAND2 ring" that ABC remapped to
+an `o21ai` would measure nothing. The reference build selects its define
+in `src/config.json`; only simulation uses behavioural gates.
+
+Re-verify both after any tool-version bump: this is exactly the kind of
+thing that silently degrades a test structure into a wire.
 
 ### Phase 1 — tile budget (DECIDE FIRST, it costs money)
 Generic-cell counts from an identical yosys `synth` run:

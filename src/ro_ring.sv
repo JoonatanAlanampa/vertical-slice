@@ -12,15 +12,9 @@
 // predicted from device physics before that. Closing that loop on
 // silicon is the reason this chip exists.
 //
-// Two build modes:
-//   default            — behavioural gates with a lumped STAGE_DLY, so
-//                        the ring oscillates in an event simulator and
-//                        the read-out path can be tested end to end.
-//   `USE_OWN_CELLS     — structural instantiation of the pinned stdcells
-//                        release (INV_X1 / NAND2_X1 / NOR2_X1). Zero
-//                        delay in RTL sim (do not simulate this mode —
-//                        it is for hardening and for gate-level sim with
-//                        the characterized library).
+// Every stage is an instance of a NAMED CELL in the two hardening
+// builds (`USE_HD_CELLS / `USE_OWN_CELLS); only simulation uses
+// behavioural gates. See ro_stage at the bottom of this file for why.
 //
 // STAGES must be ODD. Stage 0 carries the enable, so the "INV" ring is
 // 30 inverters + 1 NAND2 (the standard enable-gated ring); the NAND2 and
@@ -34,7 +28,6 @@
 `timescale 1ns / 1ps
 
 /* verilator lint_off DECLFILENAME */
-(* keep_hierarchy *)
 module ro_ring #(
     parameter int  STAGES    = 31,      // odd
     parameter      FLAVOR    = "INV",   // "INV" | "NAND2" | "NOR2"
@@ -47,10 +40,12 @@ module ro_ring #(
   // The ring is a deliberate combinational loop, and every tool in the
   // flow wants to simplify it away — a chain of 31 inverters is, to a
   // logic optimizer, one inverter. Measured, not assumed: with the nodes
-  // merely marked `keep`, yosys+ABC still collapsed all three rings to a
-  // SINGLE gate each. What holds is a per-stage module boundary
-  // (`keep_hierarchy` stops flatten, so ABC never sees two stages at
-  // once) reinforced by `keep` on every instance.
+  // merely marked `keep`, yosys+ABC collapsed all three rings to a SINGLE
+  // gate each. Which is why a hardening build never lets the mapper near
+  // them: every stage is an instance of a NAMED CELL (see ro_stage), so
+  // there is nothing to optimize and no doubt about which cell was
+  // measured. An "NAND2 ring" that ABC remapped to some other cell would
+  // measure nothing.
   /* verilator lint_off UNOPTFLAT */
   (* keep = "true" *) wire [STAGES-1:0] n;
   /* verilator lint_on UNOPTFLAT */
@@ -83,11 +78,26 @@ endmodule
 /* verilator lint_on DECLFILENAME */
 
 // ---------------------------------------------------------------------
-// One ring stage: exactly one gate, kept in its own module so that no
-// optimizer can see two of them at the same time.
+// One ring stage: exactly one gate.
+//
+// Three build modes, and only the first is ever simulated:
+//
+//   (default)        behavioural gate with a lumped STAGE_DLY, so the
+//                    ring has a finite period in an event simulator.
+//                    NEVER harden with this — the mapper collapses the
+//                    chain (measured: 31 stages -> 1 gate).
+//   `USE_HD_CELLS    sky130_fd_sc_hd cells: the reference build, the
+//                    A/B partner of the PPA comparison.
+//   `USE_OWN_CELLS   the pinned stdcells release: the chip we are
+//                    actually here to measure.
+//
+// Instantiating cells by name is the whole point of a test structure:
+// the measurement is only meaningful if we know exactly which cell it
+// timed. It also removes the optimizer from the question entirely — a
+// liberty cell instance is opaque to yosys, so the ring survives flatten,
+// constant propagation and ABC without needing keep attributes at all.
 // ---------------------------------------------------------------------
 /* verilator lint_off DECLFILENAME */
-(* keep_hierarchy *)
 module ro_stage #(
     parameter      FLAVOR    = "INV",   // "INV" | "NAND2" | "NOR2"
     parameter real STAGE_DLY = 0.1      // ns, simulation only
@@ -96,24 +106,34 @@ module ro_stage #(
     input  wire b,      // enable leg; tied to the inactive constant inside a chain
     output wire y
 );
+  generate
 `ifdef USE_OWN_CELLS
-  // hardening / gate-level: the pinned stdcells release, by cell name
-  generate
-    if (FLAVOR == "NAND2")     begin : g_own  NAND2_X1 u_cell (.A(a), .B(b), .Y(y));
-    end else if (FLAVOR == "NOR2") begin : g_own  NOR2_X1 u_cell (.A(a), .B(b), .Y(y));
-    end else                   begin : g_own  INV_X1   u_cell (.A(a),         .Y(y));
+    if (FLAVOR == "NAND2") begin : g_cell
+      NAND2_X1 u_cell (.A(a), .B(b), .Y(y));
+    end else if (FLAVOR == "NOR2") begin : g_cell
+      NOR2_X1 u_cell (.A(a), .B(b), .Y(y));
+    end else begin : g_cell
+      INV_X1 u_cell (.A(a), .Y(y));
     end
-  endgenerate
+`elsif USE_HD_CELLS
+    if (FLAVOR == "NAND2") begin : g_cell
+      sky130_fd_sc_hd__nand2_1 u_cell (.A(a), .B(b), .Y(y));
+    end else if (FLAVOR == "NOR2") begin : g_cell
+      sky130_fd_sc_hd__nor2_1 u_cell (.A(a), .B(b), .Y(y));
+    end else begin : g_cell
+      sky130_fd_sc_hd__inv_1 u_cell (.A(a), .Y(y));
+    end
 `else
-  // simulation / foundry-library reference build. Delays on continuous
-  // assignments are ignored by synthesis (yosys warns and drops them);
-  // they exist only to give the event simulator a finite ring period.
-  generate
-    if (FLAVOR == "NAND2")     begin : g_beh  assign #(STAGE_DLY) y = ~(a & b);
-    end else if (FLAVOR == "NOR2") begin : g_beh  assign #(STAGE_DLY) y = ~(a | b);
-    end else                   begin : g_beh  assign #(STAGE_DLY) y = ~a;
+    // Delays on continuous assignments are ignored by synthesis; they
+    // exist only to give the event simulator a finite ring period.
+    if (FLAVOR == "NAND2") begin : g_beh
+      assign #(STAGE_DLY) y = ~(a & b);
+    end else if (FLAVOR == "NOR2") begin : g_beh
+      assign #(STAGE_DLY) y = ~(a | b);
+    end else begin : g_beh
+      assign #(STAGE_DLY) y = ~a;
     end
-  endgenerate
 `endif
+  endgenerate
 endmodule
 /* verilator lint_on DECLFILENAME */
