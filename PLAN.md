@@ -138,7 +138,7 @@ in `src/config.json`; only simulation uses behavioural gates.
 Re-verify both after any tool-version bump: this is exactly the kind of
 thing that silently degrades a test structure into a wire.
 
-### Phase 1 — tile budget (DECIDE FIRST, it costs money)
+### Phase 1 — tile budget: DECIDED, 1x2 (measured, see phase 3)
 Generic-cell counts from an identical yosys `synth` run:
 
 | design | generic cells |
@@ -187,11 +187,15 @@ reachable; the earlier hybrid still used foundry ties):
 | TIE_X1 | 78 | 293 |
 | **total** | **2804** | **14 094** |
 
-That is **83.4 % of a 1x1 core before CTS, hold fixing and fill** — so a
-1x1 is an experiment worth running, not a foregone conclusion (stdcells'
-all-own CORDIC-1 routed at 87.4 % once). `harden/config.json` therefore
-tries 1x1 first; if placement or routing dies, the fallback is the 1x2
-line in that file, and this is the number to revisit.
+**The 1x1 question is settled, by measurement: it does not fit.** The 1x1
+was attempted first and global placement refused it outright —
+`GPL-0301, utilization 108.499 %`, before a single clock buffer or hold
+fix existed. 14 094 µm² of logic against a ~12 990 µm² core is not a
+density-knob problem, and the trims in phase 1 (~75 µm² between them)
+are nowhere near the ~1 100 µm² gap. **This chip is a 1x2**, and
+`info.yaml` was right from the start. At 1x2 the logic sits at 45.2 % of
+the core, which leaves genuine room to add test structures rather than
+shave them.
 
 The library also **changed the RTL**, which is the honest cost of building
 on cells you designed yourself: `DFF_X1` has no reset pin, so the

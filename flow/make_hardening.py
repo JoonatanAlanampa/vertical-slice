@@ -112,10 +112,12 @@ write_verilog -noattr -nohex -nodec "{netlist}"
         print(f"{k:<14}{own[k]:>8}{a:>12.1f}")
     print(f"{'TOTAL':<14}{sum(own.values()):>8}{total_area:>12.1f}")
 
-    # TT core areas at the margin settings that won the stdcells 1x1
-    # experiment (TOP/BOTTOM 1, LEFT/RIGHT 2); utilization here is
-    # pre-P&R, so it excludes the clock tree, hold buffers and fill
-    for tile, core in (("1x1", 16900.0), ("1x2", 34255.4)):
+    # TT core areas at this repo's margins (TOP/BOTTOM 1, LEFT/RIGHT 2),
+    # back-computed from OpenROAD's own utilization report rather than
+    # guessed: the 1x1 attempt placed 14094 um2 at 108.499% => 12990 um2 of
+    # core, and a second tile adds 114.24 x 159.16 um of it. Utilization
+    # here is pre-P&R: no clock tree, no hold buffers, no fill.
+    for tile, core in (("1x1", 12990.0), ("1x2", 31172.0)):
         print(f"  {tile}: {total_area / core:6.1%} of a {core:,.0f} um2 core "
               f"(logic only, before CTS/hold/fill)")
 

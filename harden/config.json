@@ -20,11 +20,12 @@
   "EXTRA_LEFS": ["dir::../lib/own.lef"],
   "EXTRA_GDS_FILES": ["dir::../lib/own_cells.gds"],
 
-  "//": "TT 1x1 tile. The logic alone is 83.4% of a 1x1 core before CTS and",
-  "//": "hold fixing, so this is an experiment: if placement or routing dies,",
-  "//": "switch to the 1x2 line below (161.00 x 225.76) and note it in PLAN.",
+  "//": "TT 1x2 tile. A 1x1 was tried first and MEASURED impossible, not",
+  "//": "merely tight: global placement reported utilization 108.5% (GPL-0301)",
+  "//": "before a single clock buffer or hold fix was inserted. 14094 um2 of",
+  "//": "logic does not fit a ~13000 um2 core, and no density knob changes that.",
   "FP_SIZING": "absolute",
-  "DIE_AREA": "0 0 161.00 111.52",
+  "DIE_AREA": "0 0 161.00 225.76",
 
   "//": "Core margins: librelane's defaults eat ~25% of a 1x1 (site HEIGHTS",
   "//": "of 10.9um each). 1/1/2/2 was the lever that won the stdcells 1x1.",
