@@ -1,0 +1,62 @@
+# Tiny Tapeout project information
+project:
+  title:        "Vertical Slice"      # Project title
+  author:       "Joonatan Alanampa"      # Your name
+  discord:      ""      # Your discord username, for communication and automatically assigning you a Tapeout role (optional)
+  description:  "CORDIC-1 rebuilt on a self-designed cell library, with ring-oscillator test structures that measure it"      # One line description of what your project does
+  language:     "SystemVerilog" # other examples include SystemVerilog, Amaranth, VHDL, etc
+  clock_hz:     25000000       # Clock frequency in Hz (or 0 if not applicable)
+
+  # How many tiles your design occupies? A single tile is about 167x108 uM.
+  # 1x2: the logic is 1410 generic cells vs CORDIC-1's 969 — the fabricated
+  # 1x1 sat at 74% utilization, so the test structures do not fit beside it.
+  # See PLAN.md phase 1 for the trims that would buy a 1x1 back.
+  tiles: "1x2"          # Valid values: 1x1, 1x2, 2x2, 3x2, 4x2, 6x2 or 8x2
+
+  # Your top module name must start with "tt_um_". Make it unique by including your github username:
+  top_module:  "tt_um_joonatanalanampa_vslice"
+
+  # List your project's source files here.
+  # Source files must be in ./src and you must list each source file separately, one per line.
+  # Don't forget to also update `PROJECT_SOURCES` in test/Makefile.
+  source_files:
+    - "project.sv"
+    - "cordic.sv"
+    - "ro_meas.sv"
+    - "ro_ring.sv"
+
+# The pinout of your project. Leave unused pins blank. DO NOT delete or add any pins.
+# This section is for the datasheet/website. Use descriptive names (e.g., RX, TX, MOSI, SCL, SEG_A, etc.).
+pinout:
+  # Inputs
+  ui[0]: "FREQ0 / RO_SEL0"
+  ui[1]: "FREQ1 / RO_SEL1"
+  ui[2]: "FREQ2 / RO_BYTE0"
+  ui[3]: "FREQ3 / RO_BYTE1"
+  ui[4]: "FREQ4 / RO_RUN"
+  ui[5]: "FREQ5 / RO_WINDOW"
+  ui[6]: "FREQ6"
+  ui[7]: "MODE (0 = sine, 1 = test structures)"
+
+  # Outputs
+  uo[0]: "HEARTBEAT / RO_D0"
+  uo[1]: "LEVEL0 / RO_D1"
+  uo[2]: "LEVEL1 / RO_D2"
+  uo[3]: "LEVEL2 / RO_D3"
+  uo[4]: "LEVEL3 / RO_D4"
+  uo[5]: "LEVEL4 / RO_D5"
+  uo[6]: "SQUARE sync / RO_D6"
+  uo[7]: "SINE sigma-delta (Audio Pmod) / RO_D7"
+
+  # Bidirectional pins
+  uio[0]: ""
+  uio[1]: ""
+  uio[2]: ""
+  uio[3]: ""
+  uio[4]: ""
+  uio[5]: ""
+  uio[6]: ""
+  uio[7]: ""
+
+# Do not change!
+yaml_version: 6
