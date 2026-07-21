@@ -164,7 +164,7 @@ This is the fallback that guarantees a submittable chip if the all-own
 hardening runs out of road before the deadline, and it is the A/B
 partner for the PPA table.
 
-### Phase 3 — all-own hardening (IN PROGRESS, library pinned at lib-v1.0)
+### Phase 3 — all-own hardening: GREEN (2026-07-21, lib-v1.0)
 `tools/fetch_lib.py` pulls the release by tag into `lib/` and checks every
 artifact against the committed `lib.lock`; `flow/make_hardening.py` builds
 the netlist locally and commits it, so CI does place-and-route only and
@@ -205,9 +205,29 @@ masked outside the measurement window so an un-cleared power-up state
 cannot reach a pin. Side benefit: the start phase is deterministic, and
 the three rings now read identical counts instead of differing by one.
 
-Open question still to settle: the rings are a combinational loop, which
-OpenSTA reports as a broken timing arc and CTS must be told to ignore. The
-STA exceptions belong in the hardening config, not in the RTL.
+**Result — first 1x2 attempt, green end to end** (run 29854238836):
+
+| | |
+|---|---|
+| placed std cells | 3450 (2804 logic + CTS, hold, taps, fill) |
+| utilization | 47.6 % of the 1x2 core |
+| setup slack | **+10.49 ns** worst corner (20 ns clock) |
+| hold slack | **+0.012 ns** worst corner |
+| antenna violations / diodes | 0 / 0 |
+| **signoff DRC (official KLayout deck)** | **0 violations** |
+| foundry cells | **0** — audited on the PLACED netlist |
+| ring stages after P&R | 30 INV_X1 / 32 NAND2_X1 / 31 NOR2_X1 |
+
+The audits are the part that matters. P&R is exactly where a flow inserts
+cells nobody asked for — tie cells, hold buffers, CTS buffers, fill — so
+the zero-foundry claim is checked *after* placement, on the netlist that
+would be streamed out, not on the one synthesis produced. Same for the
+rings: 93 stages in, 93 stages out, right flavors.
+
+Nothing about the ring oscillators upset STA in practice — the loop is
+broken at the enable gate, so there is no timing arc through it and CTS
+had no reason to touch it. The exception knobs stayed unused. (Left
+standing in case a future library or a longer ring changes that.)
 
 ### Phase 4 — gate-level verification
 Re-run `test/` against the post-layout netlist (the `gl_test` job already
