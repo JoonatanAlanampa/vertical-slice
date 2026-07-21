@@ -31,6 +31,12 @@ jobs:
           # make will return success even if the test fails, so check for failure in the results.xml
           ! grep failure results.xml
 
+      # The bring-up script runs on the demo board in ~2027. Executing it now,
+      # unmodified, against a virtual die is the only way to know it works
+      # before it is the only thing standing between us and a measurement.
+      - name: Bring-up script (virtual demo board)
+        run: python -m pytest bringup/ -v
+
       - name: Test Summary
         uses: test-summary/action@v2.4
         with:

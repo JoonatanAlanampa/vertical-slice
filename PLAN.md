@@ -304,11 +304,31 @@ stdcells item for a future release, not a blocker here — 10.5 ns of setup
 slack at a 20 ns clock absorbs any plausible ss derate, and the ship clock
 is 25 MHz regardless.
 
-### Phase 5 — submission
-Next TT shuttle after TTSKY26c. Ship with a bring-up script (MicroPython
-on the demo board's RP2040) that runs the frequency sweep and dumps the
-three ring frequencies, so the measurement happens the day the chips
-arrive rather than "eventually".
+### Phase 5 — bring-up script: DONE (2026-07-21) / submission: open
+
+`bringup/vslice_bringup.py` runs on the demo board's RP2040 and does the
+whole job: proves the die is alive, recovers the **real** clock from the
+heartbeat (never trusting the PWM request), checks the instrument is
+trustworthy, then measures all three rings and prints measured against
+predicted. `bringup/test_bringup_host.py` runs that **unmodified** script
+against a virtual RP2040 + virtual die in CI — a healthy die must pass and
+recover the frequencies to the counter's quantisation, and a broken one
+must be *caught*: dead ring, frozen counter, instrument that never
+validates, a DIP switch vetoing a control pin, and a clock that is not the
+one we asked for.
+
+It found two bugs before hardware could: `read_byte()` was clearing the
+window-select bit while walking the byte mux (a re-armed FSM could latch a
+short-window count while the script believed it asked for a long one), and
+the fake's own heartbeat divider was off by 2× — precisely the error that
+would make every ring frequency wrong by 2× in the lab while looking
+entirely reasonable.
+
+The script fails on an untrustworthy instrument and **does not** fail on
+measured-vs-predicted, because that comparison is the experiment, not a
+regression test.
+
+Still open: the submission itself, on the next TT shuttle after TTSKY26c.
 
 ### Phase 6 — close the loop
 Publish measured vs predicted: silicon ring frequency against our own
