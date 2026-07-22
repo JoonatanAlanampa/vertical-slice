@@ -16,6 +16,27 @@
   "CLOCK_PORT": "clk",
   "CLOCK_PERIOD": 20,
 
+  "//": "lib-v1.1 corner-aware re-pin: one timing view PER CORNER (ported from",
+  "//": "stdcells at lib-v1.1). LIB is the corner-keyed variable; the sky130A",
+  "//": "PDK's 9 corners = {nom,min,max} x these three patterns. hd libs ride",
+  "//": "along per corner because the flow still loads hd views. EXTRA_LIBS keeps",
+  "//": "the nominal view ONLY so yosys elaborate can blackbox our cells;",
+  "//": "flow/check_corner_spread.py asserts in CI that the SDF corners differ,",
+  "//": "which catches a nominal view silently overriding LIB.",
+  "LIB": {
+    "*_tt_025C_1v80": [
+      "pdk_dir::libs.ref/sky130_fd_sc_hd/lib/sky130_fd_sc_hd__tt_025C_1v80.lib",
+      "dir::../lib/own_hardening_tt_025C_1v80.lib"
+    ],
+    "*_ss_100C_1v60": [
+      "pdk_dir::libs.ref/sky130_fd_sc_hd/lib/sky130_fd_sc_hd__ss_100C_1v60.lib",
+      "dir::../lib/own_hardening_ss_100C_1v60.lib"
+    ],
+    "*_ff_n40C_1v95": [
+      "pdk_dir::libs.ref/sky130_fd_sc_hd/lib/sky130_fd_sc_hd__ff_n40C_1v95.lib",
+      "dir::../lib/own_hardening_ff_n40C_1v95.lib"
+    ]
+  },
   "EXTRA_LIBS": ["dir::../lib/own_hardening.lib"],
   "EXTRA_LEFS": ["dir::../lib/own.lef"],
   "EXTRA_GDS_FILES": ["dir::../lib/own_cells.gds"],

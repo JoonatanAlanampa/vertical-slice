@@ -11,6 +11,8 @@ on:
       - "harden/**"
       - "lib.lock"
       - "flow/make_hardening.py"
+      - "flow/check_corner_spread.py"
+      - "tools/fetch_lib.py"
       - ".github/workflows/harden.yml"
   workflow_dispatch:
 
@@ -69,6 +71,15 @@ jobs:
               sys.exit(f"ring stages changed during P&R: {rings} != {want}")
           print("zero-foundry: OK   rings: OK")
           EOF
+
+      # lib-v1.1 re-pin acceptance test: a single-PVT library passed through
+      # EXTRA_LIBS produced byte-identical SDF corners and still ran green, so
+      # the corner spread is asserted rather than assumed.
+      - name: Timing corners must actually differ (lib-v1.1 re-pin)
+        run: |
+          sudo chown -R "$USER" harden/runs || true
+          RUNDIR=$(ls -d harden/runs/*/ | sort | tail -1)
+          python3 flow/check_corner_spread.py "$RUNDIR"
 
       - name: hvtp corner healing + KLayout signoff DRC
         run: |

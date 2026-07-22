@@ -36,6 +36,12 @@ LOCK = ROOT / "lib.lock"
 ARTIFACTS = [
     "out/own.lib",            # timing/power, the P&R library
     "out/own_hardening.lib",  # own.lib + the physical-only cells (TIE/FILL/TAP/DIODE)
+    # lib-v1.1: per-corner hardening libs feed the corner-keyed LIB dict in
+    # harden/config.json so P&R/STA and the SDF actually differ across tt/ss/ff.
+    # (Absent from lib-v1.0; fetch_lib errors out if a pinned tag lacks them.)
+    "out/own_hardening_tt_025C_1v80.lib",
+    "out/own_hardening_ss_100C_1v60.lib",
+    "out/own_hardening_ff_n40C_1v95.lib",
     "out/own_abc.lib",        # combinational-only copy: ABC trips on a liberty with a flop
     "out/own.lef",            # abstracts (pins + OBS) for the router
     "out/own_cells.gds",      # the layouts themselves, merged at stream-out
