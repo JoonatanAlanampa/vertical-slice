@@ -12,9 +12,18 @@ test/__pycache__/
 test/results.xml
 test/gate_level_netlist.v
 
-# the standard-cell library arrives as a pinned stdcells release, and is
-# never committed here — see PLAN.md ("Library consumption: pinned")
-lib/
+# The standard-cell library arrives as a pinned stdcells release and USED to be
+# fetched at CI time and never committed (see PLAN.md, "Library consumption:
+# pinned"). It is now COMMITTED, because as of 2026-07-25 the TinyTapeout
+# submission is built from the ALL-OWN netlist and an artifact built from this
+# repository can only use files that are IN this repository — a fetch step is
+# not something the TT flow runs. Leaving it ignored would have silently
+# defeated the blocker-1 fix: the config would reference lib/ files that do not
+# exist for anyone but us.
+# The pin is still authoritative: tools/verify_lib.py checks the committed bytes
+# against lib.lock offline on every gds run, and tools/fetch_lib.py remains the
+# only way to move the pin.
+# lib/  <- deliberately NOT ignored any more
 harden/runs/
 harden/*.ys
 harden/*.log
