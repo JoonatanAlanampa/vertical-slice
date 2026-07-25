@@ -13,10 +13,44 @@ jobs:
         with:
           submodules: recursive
 
+      # The submitted GDS is built from the repository, so the cell library has
+      # to BE in the repository and has to be the pinned one. Offline check.
+      - name: Verify the committed cell library against lib.lock
+        run: python tools/verify_lib.py
+
       - name: Build GDS
         uses: TinyTapeout/tt-gds-action@ttsky26c
         with:
           pdk: sky130A
+
+      # The audit that matters most, and the one whose ABSENCE here was the
+      # whole of blocker 1: until 2026-07-25 the zero-foundry check ran only in
+      # harden.yml, on a build that was never submitted, while THIS path — the
+      # one TinyTapeout actually takes — quietly produced a foundry-cell chip
+      # and went green. Never let the submission path ship unaudited again.
+      - name: Zero-foundry audit of the SUBMITTED netlist
+        run: |
+          python3 - << 'EOF'
+          import glob, re, sys
+          pats = ["runs/*/final/nl/*.nl.v", "runs/*/final/pnl/*.pnl.v",
+                  "tt_submission/**/*.nl.v"]
+          nl = sorted({p for pat in pats for p in glob.glob(pat, recursive=True)})
+          if not nl:
+              # Fail loudly rather than pass vacuously: a check that cannot find
+              # its input is not a passing check.
+              print("searched:", *pats, sep="\n  ")
+              print("tree:", *sorted(glob.glob("runs/*/final/*"))[:20], sep="\n  ")
+              sys.exit("no final netlist found — cannot audit what ships")
+          bad = False
+          for f in nl:
+              hits = sorted(set(re.findall(r"\bsky130_\w+", open(f).read())))
+              print(f"{f}: {'FOUNDRY CELLS ' + ', '.join(hits) if hits else 'clean'}")
+              bad |= bool(hits)
+          if bad:
+              sys.exit("zero-foundry claim broken in the SUBMITTED netlist — "
+                       "see PLAN.md and research/vertical-slice-presubmit-codex.md")
+          print("zero-foundry: OK on the submitted netlist")
+          EOF
 
   precheck:
     needs: gds

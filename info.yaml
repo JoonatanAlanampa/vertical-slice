@@ -16,14 +16,18 @@ project:
   # Your top module name must start with "tt_um_". Make it unique by including your github username:
   top_module:  "tt_um_joonatanalanampa_vslice"
 
-  # List your project's source files here.
-  # Source files must be in ./src and you must list each source file separately, one per line.
-  # Don't forget to also update `PROJECT_SOURCES` in test/Makefile.
+  # THE SUBMITTED SOURCE IS THE ALL-OWN GATE NETLIST, not the RTL.
+  # Synthesis against our own cell library happens in flow/make_hardening.py and
+  # the result is committed, so CI does place-and-route only and cannot re-decide
+  # the logic. Paths resolve relative to ./src, so ../harden reaches it in place —
+  # no file move (tt-support-tools joins src_dir with each entry).
+  # src/config.json sets SYNTH_ELABORATE_ONLY for the same reason.
+  # The RTL still builds and is still tested: test/Makefile's PROJECT_SOURCES is
+  # unchanged and drives the cocotb suites off the .sv files.
+  # To revert to the foundry reference build, restore the four .sv entries and
+  # see the revert note at the top of src/config.json.
   source_files:
-    - "project.sv"
-    - "cordic.sv"
-    - "ro_meas.sv"
-    - "ro_ring.sv"
+    - "../harden/vslice_gates.v"
 
 # The pinout of your project. Leave unused pins blank. DO NOT delete or add any pins.
 # This section is for the datasheet/website. Use descriptive names (e.g., RX, TX, MOSI, SCL, SEG_A, etc.).
