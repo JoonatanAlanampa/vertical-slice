@@ -1,0 +1,11 @@
+# The pinned cell library is verified BYTE FOR BYTE against lib.lock
+# (tools/verify_lib.py, run on every gds build). Git's line-ending conversion
+# would rewrite those bytes on checkout — CRLF on Windows, LF on Linux — and the
+# sha256 pin would fail on one platform or the other, or worse, pass locally and
+# fail only in the submission build. Treat every library artifact as binary so
+# what is committed is exactly what is verified and exactly what is hardened.
+lib/** -text
+
+# The committed all-own gate netlist is the SUBMITTED source (see info.yaml).
+# Same argument: it must not be rewritten by anything.
+harden/vslice_gates.v -text
