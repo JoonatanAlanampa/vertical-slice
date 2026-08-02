@@ -23,10 +23,11 @@ pass were also wrong and are corrected below.
 | B2 | "No top-level LVS/DRC signoff on the all-own GDS" | ✅ **NOT A GAP** — it runs, is enforced, and matches uniquely; now asserted in CI |
 | M9 | 4 max-cap violations at the `max_*` corners | ⛔ **OPEN — new**, found while closing B2 |
 | — | `gds` workflow red since 2026-07-25 | 🟡 **DIAGNOSED, not fixed** — upstream defect, not the chip. Still blocks submission |
-| M5 | Documented read sequence permits a torn 24-bit count | ⛔ open (not re-verified) |
-| M6 | Prescaler in the RO clock domain has no generated-clock constraint | ⛔ open (not re-verified) |
-| M7 | `ring_prediction.py` may sum cell delays only, not interconnect | ⛔ open (not re-verified) |
-| L8 | User-facing text quotes one PVT although `lib.lock` pins three | ⛔ open (not re-verified) |
+| M5 | Documented read sequence permits a torn 24-bit count | ✅ **FIXED** — doc bug only; hardware and bring-up script were already correct |
+| M6 | Prescaler in the RO clock domain has no generated-clock constraint | ⛔ **CONFIRMED, worse than stated** — there is no SDC in the repo at all |
+| M7 | `ring_prediction.py` may sum cell delays only, not interconnect | ⛔ **CONFIRMED, different cause** — the SDF has no interconnect to sum, and drops a stage |
+| L8 | User-facing text quotes one PVT although `lib.lock` pins three | ✅ **FIXED** — text corrected, and the stated *reason* was wrong (see M10) |
+| M10 | **Corner-aware STA is not in effect.** Only 0.2% of cell delay arcs move between PVT views | ⛔ **NEW — the biggest open finding** |
 
 **Still do not pay**: the fixes need one green `gds` run to be real, the red
 badge blocks submission on its own, and M5-M7/L8 have never been checked.
@@ -321,6 +322,104 @@ driver. And `src/cordic.sv` is byte-identical to `b646d057:src/cordic.sv`
 (sha `8b399b1be922d0914ac08b628410a3683eb2c698`) — **the fabricated RTL is
 intact**, which is the premise the whole comparison rests on.
 
+## M5 — torn read. **The hardware was fine; the instructions were not.**
+
+`ro_meas` latches `count` and holds it, and `bringup/vslice_bringup.py`
+already drops RUN, waits out the in-flight window, then reads — its docstring
+even explains why. So there was never a hardware defect.
+
+`docs/info.md` was the defect. "How to test" said *raise `ui[4]`, wait past
+the window, then read the three count bytes*, and never said to lower it,
+while the register section on the same page says measurements repeat back to
+back while it is high. Anyone following the page — including a future us with
+silicon on the bench — reads a torn value. On the short window a new result
+lands every 164 us, i.e. between any two byte reads a human or a MicroPython
+host will do; on the long window the count spans two bytes, so a tear at a
+byte boundary is off by 256 and is the *normal* case, not the unlucky one.
+Page fixed, with the reason.
+
+## M6 — CONFIRMED, and the finding understated it: **there is no SDC at all.**
+
+Not "the prescaler has no generated-clock constraint" — the repo contains no
+`.sdc` file, no `create_clock`/`create_generated_clock` anywhere, and neither
+config sets `SIGNOFF_SDC_FILE`/`PNR_SDC_FILE`. The run log says so directly:
+`'SIGNOFF_SDC_FILE' is not defined. Using [the default]`.
+
+So `ro_clk` is not a clock as far as STA is concerned, and **the fastest logic
+on this die has never been timed**: `pre` is an 8-bit counter clocked directly
+by the ring. At the post-H3 prediction that is a **914 MHz** clock on a DFF_X1
+whose own liberty puts clk->Q at ~158-300 ps, with an 8-bit increment in the
+same 1.09 ns period.
+
+Note the direction of travel: fixing H3 sped the rings up 1.5-1.7x, so the
+prescaler is now **closer to its limit than before this session**, not further
+from it. If it miscounts, the instrument reports a wrong frequency and says
+`valid` — the same silent-failure class as H3 and H4.
+
+What it invalidates: the clean setup/hold/slew signoff covers the `clk` domain
+only. Fix is to define the ring domain (a `create_clock` on each ring output
+at its predicted period, with the loop arc explicitly broken) and let OpenSTA
+check the prescaler and the synchronizer crossing.
+
+## M7 — CONFIRMED, but the cause is not the one stated.
+
+The finding guessed the script forgets interconnect. It does only sum
+`IOPATH`, but that is not where the error comes from:
+
+- **Every ring `INTERCONNECT` entry in the SDF is exactly `0.000`** — checked
+  across all nine corners (189 ring arcs on the old netlist, 96 on the new).
+  There is no interconnect delay to omit. STA also reports ~98 unannotated
+  drivers. So *nobody's* prediction includes wire delay, and the script
+  cannot fix that by reading a field that is zero.
+- **One stage per ring reports zero delay.** A ring is a combinational loop;
+  OpenSTA breaks it to build an acyclic graph, so exactly one stage's `A->Y`
+  arc is `(0.000:0.000:0.000)`. The sum covers 30 of 31 stages — period ~3%
+  short, frequency ~3% high. Confirmed present in every ring, on both the old
+  and new netlists.
+
+Both biases point the same way: **the prediction is optimistic**. The script
+now prints the zero-arc count on every run and its docstring states both.
+
+## L8 — fixed, and the reason given for it was wrong
+
+`bringup/vslice_bringup.py` said the numbers carry no corner spread because
+"the library is characterized at tt/1.8V/25C only". That is false: `lib.lock`
+pins three per-corner hardening libs and `check_corner_spread.py` measures a
+13105% spread *between the liberty files*. The characterization is fine. The
+spread is missing further downstream — see M10. Text corrected in both the
+script and `docs/info.md`, which now carries the predicted numbers with all
+three caveats attached.
+
+## M10 — **corner-aware STA is not actually in effect.** NEW, and the biggest one.
+
+Between `ff_n40C_1v95` (-40 C, 1.95 V) and `ss_100C_1v60` (100 C, 1.60 V),
+**11 of 4884 cell delay arcs differ — 0.2%.** Ordinary logic cell `_3140_`
+reports `(1.201...)` / `(0.411...)` at *both*. Fast and slow silicon cannot
+have identical cell delays. Of the 28 lines that differ across the whole
+34110-line SDF, most are the `(VOLTAGE)` and `(TEMPERATURE)` header and a few
+`INTERCONNECT` arcs on the `clk`/`rst_n` input ports.
+
+**It affects both builds** — the submitted `runs/wokwi` and the bare-die
+`harden/runs` measure the same 0.2%. So the lib-v1.1 "corner-aware re-pin",
+believed landed and CI-proven since 2026-07-22, has never been in effect for
+the own cells. The likely mechanism is the one its own author wrote down:
+`EXTRA_LIBS: ["dir::../lib/own_hardening.lib"]` puts the single nominal view
+into every corner alongside the corner-keyed `LIB`.
+
+**Why nobody saw it.** `flow/check_corner_spread.py` exists precisely to catch
+this and has been passing — because its SDF test asserted only that the files
+are not *byte-identical*, and a differing `(TEMPERATURE)` header satisfies
+that. A header is not a timing model. The check now compares delay content and
+requires that a majority of arcs actually move; it fails on both builds today,
+which is the correct answer. It was also only ever run in `harden.yml`, never
+against the submitted chip — the same "guard on the wrong artifact" shape as
+blocker 1 and the skipped zero-foundry step. It now runs in `gds.yaml` too.
+
+Consequence for the tapeout: the "10.5 ns of setup slack" and the clean
+hold/slew/cap signoff are **single-PVT results wearing three PVT labels**.
+Nothing has been verified at the slow corner. That is a real gap on a chip
+with no second attempt.
+
 ## What is left, in order
 
 1. ~~H3~~ ✅ ~~H4~~ ✅ ~~B2~~ ✅ — done 2026-08-02, see above.
@@ -337,11 +436,21 @@ intact**, which is the premise the whole comparison rests on.
    and it blocks submission on its own. ⛔ Do NOT retry the linter-config
    route — two workarounds are burned and recorded below. Honest routes: an
    upstream issue/PR, or synthesis-only blackbox stubs OpenSTA also accepts.
-4. **M9** (4 max-cap violations) — diagnose; probably `CTS_MAX_CAP` 0.05 vs
-   the library's own 0.100, but that must be measured.
-5. **M5-M7, L8** — never independently verified. M5 (torn 24-bit read) is the
-   one that could corrupt a reading in the same silent way H4 could.
-6. Re-run the Codex bridge on the result before paying.
+4. **M10 — corner-aware STA is not in effect.** The largest open item: the
+   whole timing signoff is single-PVT. Start at `EXTRA_LIBS` in both configs.
+5. **M6 — write an SDC.** The ring domain is untimed and the prescaler now
+   runs at a predicted 914 MHz. Define the ring clocks, break the loop arc
+   explicitly, and let STA check the counter and the synchronizer.
+6. **M9** (max-cap, 6 at the `max_*` corners) — clock tree and OpenROAD's own
+   repair buffers; not on the measurement path.
+7. **M7** — decide whether a prediction with no wire delay and one dropped
+   stage is good enough to compare silicon against, or whether the SDF needs
+   real parasitic annotation first. This is the yardstick the chip is built
+   to be measured against, so "good enough" has to be an explicit decision.
+8. ~~M5, L8~~ ✅ closed 2026-08-02.
+9. Re-run the Codex bridge on the result before paying.
 
-**Nobody should pay against this repo until 2-5 are closed.** The measurement
-itself is now sound, which it was not this morning.
+**Nobody should pay against this repo until 2-7 are closed.** The measurement
+circuit itself is now sound, which it was not this morning; what is unsound is
+still the *prediction* it will be compared against (M7, M10) and one untimed
+clock domain (M6).

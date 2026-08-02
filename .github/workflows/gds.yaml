@@ -78,6 +78,15 @@ jobs:
         if: success() || failure()
         run: python3 tools/audit_netlist.py harden/vslice_gates.v
 
+      # Was only ever run in harden.yml, i.e. against the bare die that is
+      # never submitted — the same "guard on the wrong artifact" shape as
+      # blocker 1. It also used to compare SDF file BYTES, which passes when
+      # the files differ only in their VOLTAGE/TEMPERATURE header. Both fixed;
+      # this now runs on the chip that ships and compares delay content.
+      - name: Timing corners really differ (submitted run)
+        if: success() || failure()
+        run: python3 flow/check_corner_spread.py runs
+
   precheck:
     needs: gds
     runs-on: ubuntu-24.04

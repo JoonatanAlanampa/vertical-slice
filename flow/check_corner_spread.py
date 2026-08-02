@@ -90,7 +90,60 @@ def main():
         sys.exit("FAIL: every SDF corner is byte-identical — the corner-keyed "
                  "LIB did not reach OpenROAD (a nominal EXTRA_LIBS overriding "
                  "it would look exactly like this)")
-    print("PASS: the hardened design has a real corner spread")
+
+    # ---- byte-difference is NOT enough (found 2026-08-02) -----------------
+    # The submitted build's per-corner SDFs are not byte-identical and this
+    # check passed for eleven days — but they differ in only 28 of 34110
+    # lines, and those are the (VOLTAGE)/(TEMPERATURE) header plus a handful
+    # of INTERCONNECT arcs on the clk/rst_n input ports. Every own-CELL delay
+    # was identical at ff(-40C,1.95V) and ss(100C,1.60V), which is impossible
+    # for real corner-aware STA. A header is not a timing model, so compare
+    # the delays themselves.
+    by_corner = {}
+    for s in sdfs:
+        txt = s.read_text(errors="replace")
+        key = s.parent.name
+        vals = [float(v) for v in
+                re.findall(r"\(IOPATH \w+ \w+ \(([\d.]+):", txt)]
+        if vals:
+            by_corner.setdefault(key, vals)
+    pvt = {}
+    for corner, vals in by_corner.items():
+        m = re.search(r"(ff_n40C_1v95|tt_025C_1v80|ss_100C_1v60)", corner)
+        if m:
+            pvt.setdefault(m.group(1), []).append((corner, vals))
+    if len(pvt) < 2:
+        print("  (fewer than two PVT views found — skipping the delay check)")
+        return
+    # The metric is the FRACTION of arcs that move, not the largest single
+    # move. Between ff(-40C,1.95V) and ss(100C,1.60V) essentially every cell
+    # delay must change; a handful of outliers passing a max-delta test is
+    # what let this through (measured: 11 of 4884 arcs differ, max 12.4%, and
+    # a max-based threshold called that a pass).
+    print("\nIOPATH delay content per PVT view:")
+    ref_name, ref = sorted(pvt.items())[0][0], sorted(pvt.items())[0][1][0][1]
+    worst_frac = 1.0
+    for name, entries in sorted(pvt.items()):
+        if name == ref_name:
+            continue
+        vals = entries[0][1]
+        n = min(len(vals), len(ref))
+        diff = sum(1 for a, b in zip(ref[:n], vals[:n]) if a != b)
+        rel = max((abs(b / a - 1) for a, b in zip(ref[:n], vals[:n]) if a), default=0.0)
+        frac = diff / max(n, 1)
+        worst_frac = min(worst_frac, frac)
+        print(f"  {name:<16} {n:5d} arcs, {diff:5d} differ from {ref_name} "
+              f"({100 * frac:5.1f}%), max delta {100 * rel:6.1f}%")
+    if worst_frac < 0.50:
+        sys.exit(
+            f"FAIL: only {100 * worst_frac:.1f}% of cell delay arcs change between "
+            "PVT views. Real corner-aware STA moves essentially all of them, so "
+            "this build is effectively SINGLE-CORNER — the per-corner SDFs differ "
+            "little more than their VOLTAGE/TEMPERATURE header. The nominal "
+            "own_hardening.lib supplied via EXTRA_LIBS is the timing that reached "
+            "every corner, not the corner-keyed LIB. See READINESS.md M10.")
+    print(f"PASS: real corner spread ({100 * worst_frac:.0f}% of arcs move "
+          f"between PVT views)")
 
 
 if __name__ == "__main__":

@@ -11,6 +11,23 @@ falling edge, so it is the sum of BOTH transition delays over every stage:
 
     T = sum_stages(t_plh + t_phl)          f = 1 / T
 
+TWO KNOWN BIASES, both measured 2026-08-02 and both making this OPTIMISTIC
+(READINESS.md M7). Neither is fixable here — they are properties of the SDF
+this script reads — but a number quoted without them is dishonest:
+
+  * **One stage per ring reports zero.** A ring is a combinational loop and
+    OpenSTA must break it to get an acyclic timing graph, so exactly one
+    stage's A->Y arc comes through as (0.000:0.000:0.000). The sum therefore
+    covers 30 of 31 stages: the period is ~3% short, the frequency ~3% high.
+    `report()` now prints how many zero arcs it saw, so this is visible
+    rather than assumed.
+  * **No interconnect at all.** Every ring INTERCONNECT entry in the SDF is
+    exactly 0.000 (checked across all nine corners), and STA reports ~98
+    unannotated drivers. So this is a cell-delay-only prediction: real
+    silicon carries the wire too, and will be slower by however much that
+    is worth. Summing IOPATH is therefore not the bug it looks like — the
+    wire physics is simply absent from the input.
+
     python flow/ring_prediction.py <sdf-dir-or-file> [...]
 
 Point it at harden/runs/*/final/sdf (all-own) or at the reference build's
@@ -91,13 +108,18 @@ def report(sdf_path):
     for ring, comp in COMPOSITION.items():
         period_ns = 0.0
         rows = []
+        zeros = 0
         for celltype, n in comp.items():
             arcs = per.get((ring, celltype))
             if not arcs:
                 continue
             rise, fall = arcs
+            zeros += sum(1 for r, f in zip(rise, fall) if r == 0.0 and f == 0.0)
             period_ns += n * (st.mean(rise) + st.mean(fall))
             rows.append((celltype, n, st.mean(rise) * 1000, st.mean(fall) * 1000))
+        if zeros:
+            print(f"  [{ring}] {zeros} stage arc(s) reported 0.000 — the "
+                  f"loop-breaking arc; period is ~{100.0 * zeros / STAGES:.0f}% short")
         if not rows:
             continue
         f_hz = 1e9 / period_ns

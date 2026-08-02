@@ -76,22 +76,53 @@ low-pass (1 kOhm + 100 nF) or the TT Audio Pmod. Sweep `ui[6:0]` to walk
 the frequency table; `uo[6]` gives the scope a trigger.
 
 **What the counts should be.** Our own timing model, back-annotated onto
-the placed-and-routed netlist, predicts (short window, 25 MHz clock):
+the placed-and-routed netlist, predicts (short window, 25 MHz clock,
+post-P&R SDF at `nom_tt_025C_1v80`, netlist `0a86598`):
 
 | ring | predicted f | predicted count |
 |---|---|---|
-| INV | 442.7 MHz | 283 |
-| NAND2 | 359.2 MHz | 230 |
-| NOR2 | 252.1 MHz | 161 |
+| INV | 914.1 MHz | 585 |
+| NAND2 | 658.3 MHz | 421 |
+| NOR2 | 411.7 MHz | 263 |
 
 Multiply by 256 for the long window. A silicon reading that disagrees is
 not a bug to be fixed — it is the result this chip exists to produce, and
 the differences *between* flavors say which modelling stage to look at.
 
+**Read those numbers with three known caveats** (`READINESS.md` M6/M7/M10),
+because the point of the chip is an honest comparison:
+
+- They replace an earlier table (442.7 / 359.2 / 252.1 MHz) that was
+  measured on a netlist in which a stray buffer hung off **every** ring
+  node. Removing that load sped the predicted rings up by 1.5-1.7x. The
+  old numbers were a prediction of the wrong circuit.
+- The prediction is **optimistic by at least ~3%**: OpenSTA breaks the
+  ring's combinational loop, so one stage per ring reports a zero delay
+  and the sum covers 30 of 31 stages. Every ring INTERCONNECT delay in the
+  SDF is also exactly 0.000, so **no wire delay is included at all**.
+- There is **no corner spread** behind them yet. The build nominally has
+  three PVT views, but only 0.2% of cell delay arcs actually differ
+  between them, so treat this as a single-PVT prediction until M10 is
+  resolved. Silicon at -40 C and at 100 C will not read the same number.
+
 **Test-structure mode.** Set `ui[7]` and `ui[1:0] = 01`, raise `ui[4]`,
-wait past the window (164 us on the short setting), then read the three
-count bytes through `ui[3:2]`. Repeat for `ui[1:0] = 10` and `11`. Three
-counts, three cell delays. Compare them against `own.lib`, against the
+wait past the window (164 us on the short setting), **then LOWER `ui[4]`
+and wait one more window before reading** the three count bytes through
+`ui[3:2]`. Repeat for `ui[1:0] = 10` and `11`. Three counts, three cell
+delays.
+
+> **Drop RUN before you read — this is not optional.** `ui[4]` is a level,
+> so while it is high the FSM re-arms the moment it goes idle and a new
+> result overwrites `count` every 164 us (short window). Reading the three
+> bytes one at a time across that boundary gives you the low byte of one
+> measurement and the high byte of the next. Usually harmless, because
+> consecutive counts differ by at most one — but exactly when the count
+> crosses a byte boundary (`0x00FF` -> `0x0100`) the torn value is off by
+> 256, and on the long window, where counts are ~256x larger and span two
+> bytes, that is the normal case rather than the unlucky one. With RUN low
+> the last result stays latched and the read is atomic.
+> `bringup/vslice_bringup.py` already does this; earlier revisions of this
+> page did not say so. Compare them against `own.lib`, against the
 DEVSIM device model, and against the OpenSTA signoff numbers — that
 comparison is the reason the chip exists.
 

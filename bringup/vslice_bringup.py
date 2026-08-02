@@ -69,9 +69,21 @@ BYTE_LO, BYTE_MID, BYTE_HI, BYTE_STATUS = 0, 1, 2, 3
 ST_BUSY, ST_VALID = 0x01, 0x02
 
 # What our own timing model says (flow/ring_prediction.py, all-own netlist,
-# post-P&R SDF). Single PVT: the library is characterized at tt/1.8V/25C only,
-# so these carry NO corner spread — see PLAN.md phase 4.
-PREDICTED_HZ = {"INV": 442.7e6, "NAND2": 359.2e6, "NOR2": 252.1e6}
+# post-P&R SDF at nom_tt_025C_1v80, netlist 0a86598).
+#
+# Updated 2026-08-02. The previous values (442.7 / 359.2 / 252.1 MHz) were
+# measured on a netlist where a stray BUF_X2 hung off every ring node;
+# removing that load sped the predicted rings up by 1.5-1.7x (READINESS.md
+# H3). Treat these as optimistic by at least ~3%: OpenSTA breaks the ring's
+# combinational loop so one stage per ring contributes zero, and the SDF
+# carries no interconnect delay at all (M7).
+#
+# The old comment here said the library "is characterized at tt/1.8V/25C
+# only". That is not why there is no spread — lib.lock pins three per-corner
+# hardening libs and they really do differ. The spread is missing because
+# only 0.2% of cell delay arcs change between PVT views in the hardened
+# result (M10), which is a flow problem, not a characterization one.
+PREDICTED_HZ = {"INV": 914.1e6, "NAND2": 658.3e6, "NOR2": 411.7e6}
 
 
 def ring_hz(count, clk_hz, win_bits):
