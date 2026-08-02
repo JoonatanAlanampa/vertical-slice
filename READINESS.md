@@ -29,8 +29,11 @@ pass were also wrong and are corrected below.
 | L8 | User-facing text quotes one PVT although `lib.lock` pins three | ✅ **FIXED** — text corrected, and the stated *reason* was wrong (see M10) |
 | M10 | **Corner-aware STA is not in effect.** Only 0.2% of cell delay arcs move between PVT views | ⛔ **NEW — the biggest open finding** |
 
-**Still do not pay**: the fixes need one green `gds` run to be real, the red
-badge blocks submission on its own, and M5-M7/L8 have never been checked.
+**Still do not pay.** What is left is M10 (the timing signoff is single-PVT),
+M7 (the prediction the chip is measured against has no wire delay and drops a
+stage), M9 (max-cap on the clock tree), and the red badge, which blocks
+submission by itself. Everything that could make the *measurement* wrong is
+closed and audited in CI.
 
 ---
 
