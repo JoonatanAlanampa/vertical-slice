@@ -70,13 +70,35 @@ if {[info exists ::env(FALLBACK_SDC)] && [file exists $::env(FALLBACK_SDC)]} {
 # measured; if the counter is marginal here it is marginal there.
 set ro_period 1.094
 
+# create_clock takes a PIN or a PORT, never a net — passing the net fails with
+# "pins type 'Net' is not..." and kills STA at every corner (run 30755908998).
+# The net name `u_ro_meas.ro_clk` is stable because it comes from the RTL
+# signal, but its DRIVER is a generated instance (`NAND2_X1 _2736_` today), so
+# hardcoding the pin would silently rot on the next resynthesis. Derive it.
 set ro_net [get_nets -quiet {u_ro_meas.ro_clk}]
-if {$ro_net eq ""} {
+set ro_pin ""
+if {$ro_net ne ""} {
+    foreach spec {{direction == output} {direction == out}} {
+        if {[catch {set try [get_pins -quiet -of_objects $ro_net -filter $spec]}]} {
+            continue
+        }
+        if {$try ne ""} { set ro_pin $try; break }
+    }
+}
+if {$ro_pin eq ""} {
     # Loud, because silently skipping is how this went unnoticed for weeks.
-    puts "signoff.sdc: ERROR ring clock net 'u_ro_meas.ro_clk' NOT FOUND."
+    # Never fall back to an unfiltered get_pins here: that returns the eight
+    # prescaler CLK inputs as well as the driver, and defining a clock on each
+    # would be worse than defining none.
+    if {$ro_net eq ""} {
+        set why "the net 'u_ro_meas.ro_clk' itself was not found"
+    } else {
+        set why "the net exists but its output pin could not be selected"
+    }
+    puts "signoff.sdc: ERROR ring clock not constrained - $why."
     puts "signoff.sdc: the prescaler is UNCONSTRAINED and M6 is still open."
 } else {
-    create_clock -name ro_clk -period $ro_period $ro_net
+    create_clock -name ro_clk -period $ro_period $ro_pin
     puts "signoff.sdc: ro_clk constrained at $ro_period ns on u_ro_meas.ro_clk"
 
     # The ring is free-running and unrelated to clk. Everything that crosses
