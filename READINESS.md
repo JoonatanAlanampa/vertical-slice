@@ -434,12 +434,35 @@ The two-step measurement, kept because the fix must move both numbers:
 Pre-PnR retaining a little spread is a secondary puzzle, not a refutation —
 both numbers are far below what real corner-aware STA produces.
 
-**Candidate fix**: drop `own_hardening.lib` from `EXTRA_LIBS` in both configs,
-since the corner-keyed `LIB` already supplies the own cells per corner.
-`EXTRA_LIBS` is a leftover from lib-v1.0, when a single nominal view was all
-there was; the v1.1 re-pin added the `LIB` dict and never removed it. The risk
-is that some flow step relies on a corner-independent liberty, so this needs a
-CI round-trip to confirm rather than reasoning.
+**The obvious fix was tried and it does not work.** Dropping
+`own_hardening.lib` from `EXTRA_LIBS` in both configs (commit `9dc1d5e`) fails
+immediately, before P&R:
+
+```
+ERROR: Module `\NOR2_X1' referenced in module `\tt_um_joonatanalanampa_vslice'
+   harden run 30754622184 — yosys elaborate, exit 2
+```
+
+So `EXTRA_LIBS` really is what lets `SYNTH_ELABORATE_ONLY` blackbox the own
+cells, exactly as `harden/config.json` claimed. It is simultaneously
+load-bearing and the cause of M10. Reverted in `4b1cb98`; both configs now
+carry the finding inline so the next person does not repeat the experiment.
+
+**So the fix has to separate the two roles**, and none of these is verified —
+this is the open work:
+
+- a liberty for elaborate that carries **cell and pin definitions but no
+  timing tables**, so that even loaded into every corner it has nothing to
+  override with (needs checking that yosys accepts it and OpenSTA ignores it);
+- or a LibreLane knob that scopes an extra liberty to synthesis only — worth
+  grepping the installed librelane 3.0.x for, the way the console session
+  found the real `PL_RESIZER_*` variables;
+- ⛔ **not** `EXTRA_VERILOG_MODELS` with blackbox stubs. That was already
+  burned during the linter saga: OpenSTA reads the same variable and dies at
+  `STA (Pre-PnR)` (run 30748956528).
+
+Whatever lands must be checked with `flow/check_corner_spread.py`, which now
+measures the property directly instead of trusting the config.
 
 (That 6.2%-vs-0.2% split was itself nearly missed: a run directory holds SDFs
 from several STA steps whose corner subdirectories share names, so the first
