@@ -20,49 +20,77 @@
 `timescale 1ns / 1ps
 `celldefine
 
-module INV_X1 (input wire A, output wire Y);
+module INV_X1 (
+`ifdef USE_POWER_PINS
+    inout wire VPWR, inout wire VGND,
+`endif
+    input wire A, output wire Y);
   assign Y = ~A;
   specify
     (A => Y) = (0.04, 0.03);
   endspecify
 endmodule
 
-module INV_X2 (input wire A, output wire Y);
+module INV_X2 (
+`ifdef USE_POWER_PINS
+    inout wire VPWR, inout wire VGND,
+`endif
+    input wire A, output wire Y);
   assign Y = ~A;
   specify
     (A => Y) = (0.04, 0.03);
   endspecify
 endmodule
 
-module INV_X4 (input wire A, output wire Y);
+module INV_X4 (
+`ifdef USE_POWER_PINS
+    inout wire VPWR, inout wire VGND,
+`endif
+    input wire A, output wire Y);
   assign Y = ~A;
   specify
     (A => Y) = (0.04, 0.03);
   endspecify
 endmodule
 
-module BUF_X1 (input wire A, output wire Y);
+module BUF_X1 (
+`ifdef USE_POWER_PINS
+    inout wire VPWR, inout wire VGND,
+`endif
+    input wire A, output wire Y);
   assign Y = A;
   specify
     (A => Y) = (0.08, 0.07);
   endspecify
 endmodule
 
-module BUF_X2 (input wire A, output wire Y);
+module BUF_X2 (
+`ifdef USE_POWER_PINS
+    inout wire VPWR, inout wire VGND,
+`endif
+    input wire A, output wire Y);
   assign Y = A;
   specify
     (A => Y) = (0.08, 0.07);
   endspecify
 endmodule
 
-module BUF_X4 (input wire A, output wire Y);
+module BUF_X4 (
+`ifdef USE_POWER_PINS
+    inout wire VPWR, inout wire VGND,
+`endif
+    input wire A, output wire Y);
   assign Y = A;
   specify
     (A => Y) = (0.08, 0.07);
   endspecify
 endmodule
 
-module NAND2_X1 (input wire A, input wire B, output wire Y);
+module NAND2_X1 (
+`ifdef USE_POWER_PINS
+    inout wire VPWR, inout wire VGND,
+`endif
+    input wire A, input wire B, output wire Y);
   assign Y = ~(A & B);
   specify
     (A => Y) = (0.04, 0.04);
@@ -70,7 +98,11 @@ module NAND2_X1 (input wire A, input wire B, output wire Y);
   endspecify
 endmodule
 
-module NOR2_X1 (input wire A, input wire B, output wire Y);
+module NOR2_X1 (
+`ifdef USE_POWER_PINS
+    inout wire VPWR, inout wire VGND,
+`endif
+    input wire A, input wire B, output wire Y);
   assign Y = ~(A | B);
   specify
     (A => Y) = (0.05, 0.05);
@@ -80,7 +112,11 @@ endmodule
 
 // Positive-edge D flip-flop, no reset — the library has no flop with one,
 // which is why ro_meas clears its prescaler during warm-up instead.
-module DFF_X1 (input wire CLK, input wire D, output reg Q);
+module DFF_X1 (
+`ifdef USE_POWER_PINS
+    inout wire VPWR, inout wire VGND,
+`endif
+    input wire CLK, input wire D, output reg Q);
   always @(posedge CLK) Q <= D;
   specify
     (posedge CLK => (Q +: D)) = (0.27, 0.27);
@@ -89,29 +125,57 @@ module DFF_X1 (input wire CLK, input wire D, output reg Q);
   endspecify
 endmodule
 
-module TIE_X1 (output wire HI, output wire LO);
+module TIE_X1 (
+`ifdef USE_POWER_PINS
+    inout wire VPWR, inout wire VGND,
+`endif
+    output wire HI, output wire LO);
   assign HI = 1'b1;
   assign LO = 1'b0;
 endmodule
 
 // Physical-only cells: no function, present in the netlist for the
 // floorplan's sake.
-module WELLTAP_X1 ();
+module WELLTAP_X1 (
+`ifdef USE_POWER_PINS
+    inout wire VPWR, inout wire VGND
+`endif
+);
 endmodule
 
-module DIODE_X1 (input wire DIODE);
+module DIODE_X1 (
+`ifdef USE_POWER_PINS
+    inout wire VPWR, inout wire VGND,
+`endif
+    input wire DIODE);
 endmodule
 
-module FILL_X1 ();
+module FILL_X1 (
+`ifdef USE_POWER_PINS
+    inout wire VPWR, inout wire VGND
+`endif
+);
 endmodule
 
-module FILL_X2 ();
+module FILL_X2 (
+`ifdef USE_POWER_PINS
+    inout wire VPWR, inout wire VGND
+`endif
+);
 endmodule
 
-module FILL_X4 ();
+module FILL_X4 (
+`ifdef USE_POWER_PINS
+    inout wire VPWR, inout wire VGND
+`endif
+);
 endmodule
 
-module FILL_X8 ();
+module FILL_X8 (
+`ifdef USE_POWER_PINS
+    inout wire VPWR, inout wire VGND
+`endif
+);
 endmodule
 
 `endcelldefine
