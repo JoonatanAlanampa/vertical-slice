@@ -46,8 +46,23 @@ module ro_ring #(
   // there is nothing to optimize and no doubt about which cell was
   // measured. An "NAND2 ring" that ABC remapped to some other cell would
   // measure nothing.
+  // NOT `keep`-marked, deliberately, and this is a measurement decision
+  // rather than a style one. `keep` on this bus made every n[i] survive as a
+  // wire distinct from the stage output that drives it, so the alias could
+  // not be collapsed; the hardening flow's `insbuf` then turned each alias
+  // into a REAL BUF_X2, and `keep` protected those buffers from opt_clean.
+  // Result at the 2026-08-02 audit: 93 buffers, one hanging off every single
+  // ring node in all three rings, loading the very nodes whose delay this
+  // chip exists to measure. Silicon would have reported a slower ring and
+  // that number would have been written down as the cell delay.
+  // Measured, not assumed (five yosys variants, READINESS.md H3): opt_clean
+  // alone removes 0 of the 93 while `keep` is present; without `keep` all
+  // three rings still come through synthesis with their full 93 stage cells,
+  // because — as the comment above says — a liberty cell instance is opaque
+  // to yosys and there is nothing here to optimize. flow/audit_netlist.py
+  // now asserts the ring fanout so this cannot regress silently.
   /* verilator lint_off UNOPTFLAT */
-  (* keep = "true" *) wire [STAGES-1:0] n;
+  wire [STAGES-1:0] n;
   /* verilator lint_on UNOPTFLAT */
 
   wire fb = n[STAGES-1];                // loop closure

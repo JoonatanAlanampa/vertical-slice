@@ -7,23 +7,29 @@ and koti are FPGA targets, ServoCtl-8 and TinyRV32 are finished portfolio
 pieces, CORDIC-1 is already submitted and paid. There is no second chance and
 no other vehicle for the physics→cells→silicon claim.
 
-## Verdict: **NOT READY.** One blocker and two HIGH findings are open.
+## Verdict: **the measurement is fixed; one signoff item and the red badge remain.**
 
-The chip would fabricate. The question this repo exists to answer — *what is
-the real propagation delay of my own INV/NAND2/NOR2 cells in silicon?* — would
-come back **wrong**, and nothing in the current signoff would say so.
+Updated 2026-08-02 (second pass). H3 and H4 are closed in the RTL and the
+netlist is regenerated; B2 turned out to be **misdirected** — the signoff it
+said was missing is present, enforced and passing on the submitted build, and
+what was actually missing was anyone reading it. Two numbers in the previous
+pass were also wrong and are corrected below.
 
-| # | Finding | State at HEAD |
+| # | Finding | State |
 | --- | --- | --- |
 | B1 | Submission path built the foundry-cell chip, not the all-own one | ✅ **FIXED** |
-| — | `gds` workflow red since 2026-07-25 | 🟡 **DIAGNOSED, not fixed** — upstream defect, not the chip |
-| B2 | No top-level LVS/DRC signoff on the all-own GDS | ⛔ **OPEN** |
-| H3 | 112 dangling `BUF_X2` loading the ring oscillators | ⛔ **OPEN — this is the one that corrupts the measurement** |
-| H4 | Ring select and window length are live during a measurement | ⛔ **OPEN** |
-| M5 | Documented read sequence permits a torn 24-bit count | ⛔ open (not re-verified this pass) |
-| M6 | Prescaler in the RO clock domain has no generated-clock constraint | ⛔ open (not re-verified this pass) |
-| M7 | `ring_prediction.py` may sum cell delays only, not interconnect | ⛔ open (not re-verified this pass) |
-| L8 | User-facing text quotes one PVT although `lib.lock` pins three | ⛔ open (not re-verified this pass) |
+| H3 | Buffers loading the ring oscillators | ✅ **FIXED** — 0 on ring nodes, 0 dangling, audited in CI |
+| H4 | Ring select and window length are live during a measurement | ✅ **FIXED** — latched at arm, test proves it |
+| B2 | "No top-level LVS/DRC signoff on the all-own GDS" | ✅ **NOT A GAP** — it runs, is enforced, and matches uniquely; now asserted in CI |
+| M9 | 4 max-cap violations at the `max_*` corners | ⛔ **OPEN — new**, found while closing B2 |
+| — | `gds` workflow red since 2026-07-25 | 🟡 **DIAGNOSED, not fixed** — upstream defect, not the chip. Still blocks submission |
+| M5 | Documented read sequence permits a torn 24-bit count | ⛔ open (not re-verified) |
+| M6 | Prescaler in the RO clock domain has no generated-clock constraint | ⛔ open (not re-verified) |
+| M7 | `ring_prediction.py` may sum cell delays only, not interconnect | ⛔ open (not re-verified) |
+| L8 | User-facing text quotes one PVT although `lib.lock` pins three | ⛔ open (not re-verified) |
+
+**Still do not pay**: the fixes need one green `gds` run to be real, the red
+badge blocks submission on its own, and M5-M7/L8 have never been checked.
 
 ---
 
@@ -80,7 +86,57 @@ synthesis-only blackbox stubs that OpenSTA will also accept.
 It is not, however, the thing to fix first: H3 below requires regenerating the
 netlist anyway, so a fresh green run is needed regardless of what is done here.
 
-## H3 — 112 dangling `BUF_X2`. **The one that would ruin the experiment.**
+## H3 — buffers on every ring node. **FIXED 2026-08-02.**
+
+**Two numbers in the first pass were wrong**, and both were wrong the same
+way: they came from matching *names* in the netlist text, which is the exact
+weakness that let the defect through in the first place. Re-derived from the
+instance→net→load graph, with pin directions read from the pinned liberty:
+
+| claim (first pass) | actual |
+| --- | --- |
+| 112 `BUF_X2`, *all 112* with unread outputs | 112 total: **96 drive nothing**, 16 legitimately drive `uio_oe`/`uio_out` pin bits |
+| **87** hanging off ring-stage outputs | **93** — i.e. *every stage of all three rings*, not a subset |
+
+The 87 came from grepping for nets named `*u_stage.y*`; six stages have their
+output net named otherwise, so a name-based recount missed them. The harm was
+therefore slightly worse and much more uniform than reported: not "most of the
+ring", but every single node of it.
+
+**Root cause, located and then measured.** `ro_ring.sv` marked the ring bus
+`(* keep = "true" *)`. That kept each `n[i]` as a wire distinct from the stage
+output driving it; `insbuf -buf BUF_X2 A Y` (flow/make_hardening.py) then
+turned every one of those aliases into a real buffer, and `keep` protected the
+buffers from `opt_clean`. Five yosys variants, all measured rather than
+argued:
+
+| variant | BUF_X2 | on ring nodes | dangling | `assign`s |
+| --- | --- | --- | --- | --- |
+| HEAD (insbuf, `keep`) | 112 | **93** | 96 | 0 |
+| + `opt_clean -purge` | 109 | **93** | 93 | 0 |
+| drop `insbuf` | 0 | 0 | 18 | 7 |
+| drop `keep` | 19 | 0 | 3 | 0 |
+| **drop `keep` + purge** | **16** | **0** | **0** | **0** |
+
+The second row is the important one: **purging alone removes none of the 93**,
+because `keep` is what protects them. And every variant still synthesises all
+93 stage cells, which settles the fear that the attribute was load-bearing —
+`ro_ring.sv`'s own comment already said a liberty cell instance is opaque to
+yosys, and it was right.
+
+**Fix**: drop the attribute, add `opt_clean -purge` after `insbuf`. Result —
+2764 cells, 16 `BUF_X2` (all driving chip output pins), **0 on ring nodes, 0
+dangling, 0 assign statements**; rings intact at 93 stage cells.
+
+**The audit is now fanout-aware** (`tools/audit_netlist.py`, wired into
+`make_hardening.py` and `gds.yaml`). It builds a driver/load graph with pin
+directions taken from `lib/own_hardening.lib`, and asserts: zero foundry
+cells, the ring census, **no cell output that drives nothing**, and **each
+ring stage drives exactly one next stage plus the 3 documented taps**. The old
+census could not have failed on this — the buffers are named `_4906_` and a
+count cannot see a load.
+
+## (superseded, kept for the record) H3 as first written
 
 Re-derived independently from `harden/vslice_gates.v` at HEAD by parsing every
 instance and counting net occurrences:
@@ -114,7 +170,31 @@ all 112 attached. **A count-based audit cannot see a load.**
 Note the netlist file has not changed since 2026-07-22, i.e. this is the same
 netlist the review looked at, and B1's fix means it is now the one that ships.
 
-## H4 — selection is live during a measurement. Confirmed by reading the FSM.
+## H4 — selection is live during a measurement. **FIXED 2026-08-02.**
+
+`sel` and `win_long` are now latched into `sel_q`/`win_long_q` on the
+`S_IDLE → S_WARM` transition, and everything downstream — the ring enables,
+the `ro_clk` mux and `win_top` — reads the latched copies. Arming is the only
+place the live inputs are read.
+
+The header comment that asserted *"`sel` is only ever changed with the FSM
+idle"* has been corrected too: it was a hope about the operator stated as a
+property of the design, and it is the reason nobody looked.
+
+`test_selection_is_latched_at_arm` arms on INV, then swings `sel` across every
+other value **including off** and flips the window bit mid-window, and asserts
+the count is unchanged. **Verified to have teeth**: reverted against the
+pre-fix RTL it fails with `still busy: the window length was taken from the
+live switch, not the one latched at arm time`; against the fix it passes.
+Whole suite 8/8, plus 9/9 bring-up.
+
+One trap worth recording for anyone writing a similar test: `run` is a level,
+so holding it high past the end of the window re-arms the FSM immediately and
+`busy` reads 1 for an honest reason. The test drops `run` just before the
+window closes, exactly as the existing `measure()` helper does — the first
+draft did not, and failed against the *fixed* RTL.
+
+## (superseded, kept for the record) H4 as first written
 
 `src/ro_meas.sv:125-165`: `S_IDLE` enters `S_WARM` on `run && sel != 0`, but
 **nothing captures `sel` or the window length**. `S_WARM` and `S_MEAS` keep
@@ -128,7 +208,55 @@ model selection as captured-at-start, so neither can see this.
 **Fix is small**: latch `sel` and `win_top` into registers on the
 `S_IDLE → S_WARM` transition and use the latched copies in `S_WARM`/`S_MEAS`.
 
-## B2 — no top-level connectivity signoff. Open, and the fix is not "turn LVS on".
+## B2 — **not a gap. The signoff exists, is enforced, and passes.**
+
+Re-derived 2026-08-02 from the log artifact of run `30749148303` (commit
+`2312cf2`) rather than from the config comment. B2 cited
+`harden/config.json:84-88` — but **that file builds a bare die that is never
+submitted** (no IO placement, no PDN, no tile template; `src/config.json` says
+so explicitly). The chip that ships is built by `tt-gds-action` from
+`src/config.json`, which disables none of it. On that build:
+
+```
+62-netgen-lvs   Final result: Circuits match uniquely.
+                7026 devices / 3070 nets — equal on both sides, per cell type
+                all 45 top-level pins equivalent
+                ERROR_ON_LVS_ERROR = True, enforced by 63-checker-lvs
+                design__lvs_*__count = 0   (all seven metrics)
+58-magic-drc    magic__drc_error__count = 0
+43-checker-trdrc route__drc_errors      = 0   (converged 2720 -> 0 over 35 iters)
+                antenna 0 / PDN 0 / max_slew 0 / max_fanout 0
+```
+
+And netgen runs it **with `-blackbox`**, loading only the sky130 SPICE models,
+so the own cells are black boxes: this is precisely the "hierarchical LVS with
+the cells as black boxes" that the first pass proposed as the fix for B2. It
+compares the magic-extracted GDS against the post-P&R netlist — the comparison
+that catches a missing via, an open net or a LEF-to-GDS pin mismatch, which is
+exactly what cell-level LVS in `stdcells` structurally cannot see.
+
+Why it looked open: the config comment about magic's CIF read emitting "tens
+of thousands of phantom errors" is true of the **bare-die** build, and was read
+as if it applied to the tapeout. The comment now says which build it describes.
+
+**What was genuinely missing was that nobody read the result.** It sat in a
+984-file log artifact behind a red badge caused by an unrelated upstream `cat`.
+`tools/check_signoff.py` now runs in `gds.yaml`, prints every signoff number,
+and fails on a regression — including an anti-vacuity guard (a unique match
+over fewer than 2000 devices is refused, because a check that passes over
+nothing is what blocker 1 was).
+
+## M9 — 4 max-cap violations. **NEW, open.**
+
+`design__max_cap_violation__count = 4` at all three `max_*` corners (1 at
+nominal) on the same run. Everything else in signoff is zero, so this is the
+only number that is not clean. Not diagnosed yet: which nets, and whether it
+is the ring taps or the CTS tree. `CTS_MAX_CAP` is set to 0.05 while the own
+liberty declares `max_capacitance : 0.100` per cell, so the constraint may
+simply be tighter than the library requires — that has to be checked, not
+assumed. `check_signoff.py` pins the baseline at 4 so it cannot grow quietly.
+
+## (superseded, kept for the record) B2 as first written
 
 `harden/config.json:84-88` disables `RUN_KLAYOUT_XOR`, `RUN_KLAYOUT_DRC`,
 `ERROR_ON_MAGIC_DRC`, `ERROR_ON_ILLEGAL_OVERLAPS` and `ERROR_ON_LVS_ERROR`.
@@ -155,17 +283,22 @@ driver. And `src/cordic.sv` is byte-identical to `b646d057:src/cordic.sv`
 (sha `8b399b1be922d0914ac08b628410a3683eb2c698`) — **the fabricated RTL is
 intact**, which is the premise the whole comparison rests on.
 
-## Order to fix, when you choose to do this
+## What is left, in order
 
-1. **H3** — stop the resizer attaching buffers to ring nodes (a `set_dont_touch`
-   on the ring nets, or exclude `BUF_X2` from the RO region), regenerate
-   `vslice_gates.v`, and **make the audit fanout-aware** so the next one cannot
-   pass with loads attached. Without this the chip measures the wrong number.
-2. **H4** — latch `sel`/window at `S_IDLE → S_WARM`; add a test that changes
-   the inputs mid-measurement and asserts the result is unchanged.
-3. **B2** — pick a connectivity check that survives own cells, or write the
-   waiver.
-4. M5-M7, L8.
-5. Re-run the Codex bridge on the result before paying.
+1. ~~H3~~ ✅ ~~H4~~ ✅ ~~B2~~ ✅ — done 2026-08-02, see above.
+2. **One green `gds` run.** Everything above is verified locally (8/8 cocotb,
+   9/9 bring-up, both audits pass on the regenerated netlist) but the netlist
+   changed, so the signoff numbers quoted here are from the *previous* one.
+   They are re-asserted automatically now: `check_signoff.py` runs in CI.
+3. **The red badge.** Upstream `tt-gds-action` defect, unrelated to the chip,
+   and it blocks submission on its own. ⛔ Do NOT retry the linter-config
+   route — two workarounds are burned and recorded below. Honest routes: an
+   upstream issue/PR, or synthesis-only blackbox stubs OpenSTA also accepts.
+4. **M9** (4 max-cap violations) — diagnose; probably `CTS_MAX_CAP` 0.05 vs
+   the library's own 0.100, but that must be measured.
+5. **M5-M7, L8** — never independently verified. M5 (torn 24-bit read) is the
+   one that could corrupt a reading in the same silent way H4 could.
+6. Re-run the Codex bridge on the result before paying.
 
-**Nobody should pay against this repo until at least 1-3 are closed.**
+**Nobody should pay against this repo until 2-5 are closed.** The measurement
+itself is now sound, which it was not this morning.

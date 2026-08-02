@@ -52,6 +52,26 @@ jobs:
           print("zero-foundry: OK on the submitted netlist")
           EOF
 
+      # Blocker 2 was "no top-level connectivity signoff on the all-own GDS".
+      # It is actually there and it passes — netgen LVS with `-blackbox`
+      # comparing the magic-extracted GDS against the post-P&R netlist, which
+      # is precisely the check cell-level LVS in stdcells cannot do. What was
+      # missing was anybody READING it: the verdict sat in a 984-file log
+      # artifact behind a red badge. So read it here, every run, and fail on a
+      # regression. Runs even when Build GDS failed, because the flow completes
+      # all 68 steps before the upstream summary `cat` kills the step.
+      - name: Signoff numbers of the submitted run (LVS / DRC / antenna)
+        if: success() || failure()
+        run: python3 tools/check_signoff.py runs
+
+      # Fanout-aware audit of the netlist that ships. The zero-foundry check
+      # above counts cell TYPES and the ring check counts INSTANCE NAMES;
+      # neither can see a load, which is how 93 buffers came to sit on the
+      # ring-oscillator nodes this chip exists to measure (READINESS.md H3).
+      - name: Connectivity audit of the committed netlist
+        if: success() || failure()
+        run: python3 tools/audit_netlist.py harden/vslice_gates.v
+
   precheck:
     needs: gds
     runs-on: ubuntu-24.04

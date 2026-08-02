@@ -200,6 +200,73 @@ async def test_readout_mux(dut):
 
 
 @NO_RINGS
+async def test_selection_is_latched_at_arm(dut):
+    """Moving the DIP switches mid-measurement must not change the result.
+
+    `sel` and `win_long` come from a human hand on ui[]. Before H4 was
+    fixed, S_WARM/S_MEAS read them live: turning the ring switch halfway
+    through a window counted edges from two different oscillators, and
+    changing the window switch compared the count against the wrong
+    denominator — with `valid` still asserted over the top. A silently
+    wrong instrument is the one failure this chip cannot afford.
+
+    Neither the old cocotb suite nor bringup/test_bringup_host.py could see
+    it: both model selection as captured-at-start, which is what this test
+    now actually proves the hardware does.
+    """
+    await start(dut)
+
+    reference = await measure(dut, SEL_INV)
+
+    # Arm on INV, then vandalise the switches mid-window: swing sel across
+    # every other value INCLUDING off, and flip the window bit too.
+    # `run` is a LEVEL: leaving it high past the end of the window re-arms
+    # the FSM immediately (test_repeat_and_mode_mux covers that on purpose),
+    # so the timeline below drops it just before the window closes — exactly
+    # what measure() does — while keeping the switches disturbed.
+    t = 0
+    dut.ui_in.value = ctrl(SEL_INV, byte_sel=3, run=True)
+    await ClockCycles(dut.clk, 4)
+    t += 4
+    assert int(dut.uo_out.value) & 0b01, "busy never asserted"
+
+    mid = WARM + 2 ** (WIN_SHORT - 1)
+    await ClockCycles(dut.clk, mid - t)
+    t = mid
+    for bad in (SEL_NOR2, SEL_OFF, SEL_NAND2):
+        dut.ui_in.value = ctrl(bad, byte_sel=3, run=True, win_long=True)
+        await ClockCycles(dut.clk, 64)
+        t += 64
+
+    drop = WARM + 2 ** WIN_SHORT - 16
+    await ClockCycles(dut.clk, drop - t)
+    dut.ui_in.value = ctrl(SEL_NAND2, byte_sel=3, run=False, win_long=True)
+
+    # Let the ORIGINAL short window finish. If win_long had leaked through,
+    # the FSM would still be busy here — 2**20 cycles, not 2**12.
+    await ClockCycles(dut.clk, 64)
+
+    status = int(dut.uo_out.value)
+    assert (status & 0b01) == 0, \
+        "still busy: the window length was taken from the live switch, " \
+        "not the one latched at arm time"
+    assert status & 0b10, "valid never asserted"
+
+    disturbed = ((await read_byte(dut, SEL_NAND2, 2)) << 16 |
+                 (await read_byte(dut, SEL_NAND2, 1)) << 8 |
+                 (await read_byte(dut, SEL_NAND2, 0)))
+
+    # All three rings model the same period in RTL, so a leaked `sel` shows
+    # up as a gap in the count (edges lost while sel briefly said OFF),
+    # not as a different frequency.
+    assert abs(disturbed - reference) <= 1, (
+        f"count moved when the switches were disturbed mid-measurement: "
+        f"{disturbed} vs {reference} — selection is not latched at arm")
+    dut._log.info("selection latched: count %d survived sel/window vandalism "
+                  "mid-window (reference %d)", disturbed, reference)
+
+
+@NO_RINGS
 async def test_repeat_and_mode_mux(dut):
     """run held high repeats the measurement; ui[7]=0 returns the sine."""
     await start(dut)

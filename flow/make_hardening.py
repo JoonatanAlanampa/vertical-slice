@@ -17,6 +17,19 @@ differences that matter here:
   * the netlist is audited for `sky130_` content. TIE_X1 in lib-v1.0 means
     even the tie cells are ours, so the correct number is zero.
 
+`insbuf` is followed by `opt_clean -purge`, and that pairing is load-bearing
+rather than tidiness. `insbuf` materialises a real BUF_X2 for every wire
+alias; where the alias is unread the buffer drives nothing, and its INPUT is
+still a load on whatever drives it. At the 2026-08-02 audit that put a buffer
+on all 93 ring-oscillator nodes — parasitic capacitance on the exact nodes
+this chip measures (READINESS.md H3). The purge removes them. It only works
+because `ro_ring.sv` no longer marks the ring bus `keep`: measured, opt_clean
+removes 0 of the 93 while the attribute is there.
+
+The result is checked by tools/audit_netlist.py, which is fanout-aware — the
+census this file used to run cannot see a load, which is why nothing caught
+it for eleven days.
+
     python flow/make_hardening.py
 
 Outputs harden/vslice_gates.v. Requires lib/ (see tools/fetch_lib.py).
@@ -78,6 +91,7 @@ abc -liberty "{LIB / 'own_abc.lib'}"
 opt_clean -purge
 hilomap -hicell TIE_X1 HI -locell TIE_X1 LO
 insbuf -buf BUF_X2 A Y
+opt_clean -purge
 stat
 write_verilog -noattr -nohex -nodec "{netlist}"
 """
@@ -143,6 +157,18 @@ write_verilog -noattr -nohex -nodec "{netlist}"
                  "  (a collapsed ring measures nothing — see PLAN.md phase 0)")
     total = sum(ring_cells.values())
     print(f"rings: OK ({total} stage cells = {RINGS} x {STAGES}) {ring_cells}")
+
+    # ---- audit 3: connectivity, because a census cannot see a load ---------
+    # Audits 1 and 2 above both passed at HEAD while 93 BUF_X2 sat on the ring
+    # nodes: one counts cell TYPES, the other counts instances matching
+    # *u_stage*, and the buffers are named `_4906_`. This is the check that
+    # can actually fail on H3.
+    print()
+    rc = subprocess.run([sys.executable, str(ROOT / "tools" / "audit_netlist.py"),
+                         str(netlist)]).returncode
+    if rc != 0:
+        sys.exit("\nERROR: netlist connectivity audit failed (see above)")
+
     print(f"\nnetlist -> {netlist.relative_to(ROOT)}")
 
 

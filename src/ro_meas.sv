@@ -16,8 +16,11 @@
 // config, not in the RTL):
 //   * `ro_clk` is a combinational mux of the three ring outputs. Only
 //     one ring is ever enabled, and the disabled ones settle to a static
-//     level, so the mux never glitches during a measurement; `sel` is
-//     only ever changed with the FSM idle.
+//     level, so the mux never glitches during a measurement. `sel` cannot
+//     change under a running measurement because the mux is driven by
+//     `sel_q`, latched at arm time — see the registers below. (This line
+//     used to claim `sel` "is only ever changed with the FSM idle", which
+//     was an assumption about the operator, not a property of the chip.)
 //   * the prescaler runs in the ring's own domain and is cleared DURING
 //     WARM-UP, not by `rst`. It has no clock at all while its ring is
 //     off, so a reset synchronous to it could never take effect — but
@@ -70,9 +73,24 @@ module ro_meas #(
   logic [WIN_LONG-1:0] tick;
   logic [23:0]         acc;
 
+  // A measurement runs on the selection it STARTED with. `sel` and
+  // `win_long` arrive from DIP switches on ui[], i.e. from a human hand at
+  // an arbitrary moment, and the whole block below is timed in units of a
+  // window: change the ring mid-count and the counter accumulates edges
+  // from two different oscillators, change the window and the count is
+  // compared against the wrong denominator. Either way the result is
+  // garbage that `valid` still calls good — the worst failure mode an
+  // instrument can have, because it is silent.
+  //
+  // The header comment above used to assert "`sel` is only ever changed
+  // with the FSM idle" as if it were a property of the design. It was a
+  // hope about the operator. These two registers make it true in hardware.
+  logic [1:0] sel_q;
+  logic       win_long_q;
+
   wire armed = (st != S_IDLE);
-  wire [WIN_LONG-1:0] win_top = win_long ? {WIN_LONG{1'b1}}
-                                         : {{(WIN_LONG-WIN_SHORT){1'b0}}, {WIN_SHORT{1'b1}}};
+  wire [WIN_LONG-1:0] win_top = win_long_q ? {WIN_LONG{1'b1}}
+                                           : {{(WIN_LONG-WIN_SHORT){1'b0}}, {WIN_SHORT{1'b1}}};
 
   // The `rst` term is not redundant: it makes the rings provably dark
   // whenever reset is asserted, without depending on `st` being resolved.
@@ -80,13 +98,13 @@ module ro_meas #(
   // stale value, it is a simulator that may never converge.
   always_comb begin
     ring_en = 3'b000;
-    if (!rst && armed && sel != 2'd0) ring_en[sel - 2'd1] = 1'b1;
+    if (!rst && armed && sel_q != 2'd0) ring_en[sel_q - 2'd1] = 1'b1;
   end
 
   // ------------------------------------------- ring-domain prescaler
   logic ro_clk;
   always_comb begin
-    case (sel)
+    case (sel_q)
       2'd1:    ro_clk = osc[0];
       2'd2:    ro_clk = osc[1];
       2'd3:    ro_clk = osc[2];
@@ -124,19 +142,25 @@ module ro_meas #(
   // ------------------------------------------------------------- control
   always_ff @(posedge clk)
     if (rst) begin
-      st    <= S_IDLE;
-      tick  <= '0;
-      acc   <= '0;
-      count <= '0;
-      busy  <= 1'b0;
-      valid <= 1'b0;
+      st         <= S_IDLE;
+      tick       <= '0;
+      acc        <= '0;
+      count      <= '0;
+      busy       <= 1'b0;
+      valid      <= 1'b0;
+      sel_q      <= 2'd0;
+      win_long_q <= 1'b0;
     end else begin
       case (st)
         S_IDLE:
+          // Arming is the ONLY place the live inputs are read. From here to
+          // the latch of `count`, the measurement is immune to the switches.
           if (run && sel != 2'd0) begin
-            st   <= S_WARM;
-            tick <= '0;
-            busy <= 1'b1;
+            st         <= S_WARM;
+            tick       <= '0;
+            busy       <= 1'b1;
+            sel_q      <= sel;
+            win_long_q <= win_long;
           end else
             busy <= 1'b0;
 
