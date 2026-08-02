@@ -24,7 +24,7 @@ pass were also wrong and are corrected below.
 | M9 | 4 max-cap violations at the `max_*` corners | ⛔ **OPEN — new**, found while closing B2 |
 | — | `gds` workflow red since 2026-07-25 | 🟡 **DIAGNOSED, not fixed** — upstream defect, not the chip. Still blocks submission |
 | M5 | Documented read sequence permits a torn 24-bit count | ✅ **FIXED** — doc bug only; hardware and bring-up script were already correct |
-| M6 | Prescaler in the RO clock domain has no generated-clock constraint | ⛔ **CONFIRMED, worse than stated** — there is no SDC in the repo at all |
+| M6 | Prescaler in the RO clock domain has no generated-clock constraint | ✅ **CLOSED** — signoff SDC added; the counter closes at 1.094 ns with 266 ps slack |
 | M7 | `ring_prediction.py` may sum cell delays only, not interconnect | ⛔ **CONFIRMED, different cause** — the SDF has no interconnect to sum, and drops a stage |
 | L8 | User-facing text quotes one PVT although `lib.lock` pins three | ✅ **FIXED** — text corrected, and the stated *reason* was wrong (see M10) |
 | M10 | **Corner-aware STA is not in effect.** Only 0.2% of cell delay arcs move between PVT views | ⛔ **NEW — the biggest open finding** |
@@ -338,7 +338,52 @@ host will do; on the long window the count spans two bytes, so a tear at a
 byte boundary is off by 256 and is the *normal* case, not the unlucky one.
 Page fixed, with the reason.
 
-## M6 — CONFIRMED, and the finding understated it: **there is no SDC at all.**
+## M6 — **CLOSED 2026-08-02. The domain is constrained, and the counter closes.**
+
+`harden/signoff.sdc` now defines the ring domain, wired as `SIGNOFF_SDC_FILE`
+in both configs. The proof that it was genuinely unanalysed before, and the
+answer to "can an 8-bit counter run at 914 MHz on our own cells":
+
+| metric | before | after |
+| --- | --- | --- |
+| `timing__setup_r2r__ws` | **inf** | **0.2661 ns** |
+| `timing__setup__ws` | 10.34 ns | 0.2661 ns |
+| `timing__setup_vio__count` | 0 | **0** |
+| `timing__hold_vio__count` | 0 | 0 |
+
+`inf` is the smoking gun: there were **no register-to-register paths being
+timed at all**, which is what an unconstrained clock domain looks like from
+the outside — and it reports zero violations, indistinguishable from success.
+The 10.34 ns "worst setup slack" everyone had been quoting was the 20 ns `clk`
+domain and nothing else.
+
+**The prescaler meets timing at 1.094 ns with 266 ps of slack and zero
+violations.** Data path = 1.094 − 0.266 = **0.828 ns**, so the counter holds
+up to roughly **1.21 GHz** against rings predicted at 914 MHz — about 32%
+frequency headroom. That is the honest answer, and it is comfortable rather
+than marginal.
+
+Two caveats that keep it honest:
+
+- The 1.094 ns period is the *predicted* fastest ring, and that prediction is
+  known optimistic (M7: no interconnect delay, one stage dropped by the loop
+  break). Real silicon ringing faster eats the headroom directly. The 1.21 GHz
+  figure is the number to re-check against the first measurement.
+- The constraint is **signoff-only, on purpose**. `PNR_SDC_FILE` is untouched,
+  so CTS never sees `ro_clk`; if it did it would build a clock tree on the
+  rings, which is H3 by another road. The routed-netlist audit (which passes)
+  is what proves it stayed away.
+
+`check_signoff.py` now fails if `ro_clk` is absent from the STA clock list, so
+the domain cannot quietly become unconstrained again. Verified green on the
+submitted path: `[M6] ring clock : ro_clk present in STA clock list`.
+
+Two attempts were needed: `create_clock` takes a pin or a port, and passing
+the net killed STA at every corner (run `30755908998`). The pin is derived
+from the net at read time rather than hardcoded, because the driver is a
+generated instance name that changes on any resynthesis.
+
+## (superseded) M6 as first written — there is no SDC at all
 
 Not "the prescaler has no generated-clock constraint" — the repo contains no
 `.sdc` file, no `create_clock`/`create_generated_clock` anywhere, and neither
@@ -501,9 +546,8 @@ with no second attempt.
    upstream issue/PR, or synthesis-only blackbox stubs OpenSTA also accepts.
 4. **M10 — corner-aware STA is not in effect.** The largest open item: the
    whole timing signoff is single-PVT. Start at `EXTRA_LIBS` in both configs.
-5. **M6 — write an SDC.** The ring domain is untimed and the prescaler now
-   runs at a predicted 914 MHz. Define the ring clocks, break the loop arc
-   explicitly, and let STA check the counter and the synchronizer.
+5. ~~M6~~ ✅ closed 2026-08-02 — the ring domain is constrained and the
+   prescaler meets timing with 266 ps of slack (~32% frequency headroom).
 6. **M9** (max-cap, 6 at the `max_*` corners) — clock tree and OpenROAD's own
    repair buffers; not on the measurement path.
 7. **M7** — decide whether a prediction with no wire delay and one dropped
