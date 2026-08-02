@@ -246,15 +246,53 @@ and fails on a regression — including an anti-vacuity guard (a unique match
 over fewer than 2000 devices is refused, because a check that passes over
 nothing is what blocker 1 was).
 
-## M9 — 4 max-cap violations. **NEW, open.**
+## M9 — max-cap violations. **NEW, open, but NOT on the measurement path.**
 
-`design__max_cap_violation__count = 4` at all three `max_*` corners (1 at
-nominal) on the same run. Everything else in signoff is zero, so this is the
-only number that is not clean. Not diagnosed yet: which nets, and whether it
-is the ring taps or the CTS tree. `CTS_MAX_CAP` is set to 0.05 while the own
-liberty declares `max_capacitance : 0.100` per cell, so the constraint may
-simply be tighter than the library requires — that has to be checked, not
-assumed. `check_signoff.py` pins the baseline at 4 so it cannot grow quietly.
+`design__max_cap_violation__count` was 4 at `2312cf2` and is **6 at
+`f2737a3`** — the H3/H4 fixes re-mapped the netlist, so these are different
+nets, not a worsening of the same ones. Everything else in signoff is zero.
+Caught automatically by `check_signoff.py` on its first real run, which is
+what it is for.
+
+Named, from `51-openroad-stapostpnr/*/checks.rpt` (worst corner shown):
+
+```
+max_ff_n40C_1v95        limit      cap      slack
+clkbuf_0_clk/Y          0.100    0.1149   -0.0149   clock buffer
+max_cap15/Y             0.100    0.1126   -0.0126   OpenROAD's own repair buffer
+max_cap27/Y             0.100    0.1075   -0.0075   ditto
+_3140_/Y                0.100    0.1032   -0.0032   logic cell
+wire23/Y                0.100    0.1016   -0.0016   wire-repair buffer
+max_cap24/Y             0.100    0.1004   -0.0004   ditto
+```
+
+Two things this settles:
+
+- **No violator is a ring node, at any of the nine corners.** The instrument
+  is unaffected. `check_signoff.py` now asserts this specifically rather than
+  counting: a max-cap violation on a ring node is a loaded oscillator, i.e.
+  the H3 failure by another route, and a count cannot tell that apart from
+  "the clock tree is 1.5% over".
+- **The earlier guess was wrong**: the limit being applied is `0.100`, which
+  is the own library's declared `max_capacitance` — *not* `CTS_MAX_CAP` 0.05.
+  So this is not a self-inflicted tight constraint; it is the clock tree and
+  OpenROAD's own max-cap repair buffers failing to fully close against the
+  drive strength our BUF cells actually have.
+
+Severity: worst overage 14.9%, most under 3%, all on the clock/repair path.
+Real, worth closing before silicon, not measurement-corrupting. Likely levers:
+a stronger `CTS_ROOT_BUFFER`, or more clock-tree levels.
+
+## The zero-foundry audit does not run when the badge is red — **fixed**
+
+Found while wiring the above: `gds.yaml`'s zero-foundry step — the whole of
+blocker 1's fix — had no `if:` condition, so GitHub skipped it whenever
+`Build GDS` failed. `Build GDS` has failed on every run since 2026-07-25 for
+the unrelated upstream reason, which means **B1's guard has been silently
+inert for eleven days, on exactly the path it was written to protect.** The
+flow completes all 68 steps and writes the netlist before that failure, so
+the audit can and should still run. All three audit steps now carry
+`if: success() || failure()`.
 
 ## (superseded, kept for the record) B2 as first written
 

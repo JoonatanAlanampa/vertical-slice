@@ -62,9 +62,17 @@ MUST_BE_ZERO = [
     "synthesis__check_error__count",
 ]
 
-# Open item, deliberately not zero. Recorded in READINESS.md; the gate is
-# "must not get worse", so it cannot quietly grow while nobody is looking.
-MAX_CAP_BASELINE = 4
+# Open item, deliberately not zero (READINESS.md M9). Measured 6 at f2737a3,
+# was 4 at 2312cf2 — the netlist was re-mapped by the H3/H4 fixes, so the
+# violating nets are not the same ones. The count gate is only "do not get
+# worse"; the gate that actually matters is RING_SAFE below.
+MAX_CAP_BASELINE = 6
+
+# The one max-cap violation that would matter. A ring node over its cap limit
+# is a loaded oscillator, i.e. the wrong delay reported as the right one —
+# the exact failure H3 was. Counting violations cannot distinguish "the clock
+# tree is 1.5% over" from "the instrument is lying", so name-match them.
+RING_PATTERNS = ("u_ro_", "u_stage", "_ro_inv", "_ro_nand", "_ro_nor")
 
 # Anti-vacuity: this design is ~2700 own cells plus fill/taps. A "clean"
 # signoff over an empty or trivial circuit is what blocker 1 was.
@@ -86,6 +94,29 @@ def find_lvs_report(root):
     hits = sorted(glob.glob(f"{root}/**/*-netgen-lvs/reports/lvs.netgen.rpt",
                             recursive=True))
     return Path(hits[-1]) if hits else None
+
+
+def max_cap_violators(root):
+    """(pin, limit, cap, slack) per corner, from the post-P&R STA checks."""
+    out = {}
+    for f in sorted(glob.glob(f"{root}/**/*-openroad-stapostpnr/*/checks.rpt",
+                              recursive=True)):
+        corner = Path(f).parent.name
+        txt = Path(f).read_text(errors="replace")
+        m = re.search(r"max capacitance\s*\n\s*Pin.*?\n-+\n(.*?)(?:\n\s*\n|\Z)",
+                      txt, re.S)
+        if not m:
+            continue
+        rows = []
+        for line in m.group(1).splitlines():
+            g = re.match(r"\s*(\S+)\s+([\d.]+)\s+([\d.]+)\s+(-?[\d.]+)\s*\(VIOLATED\)",
+                         line)
+            if g:
+                rows.append((g.group(1), float(g.group(2)), float(g.group(3)),
+                             float(g.group(4))))
+        if rows:
+            out[corner] = rows
+    return out
 
 
 def main():
@@ -115,10 +146,27 @@ def main():
         notes.append("design__max_cap_violation__count: ABSENT")
     elif mc > MAX_CAP_BASELINE:
         fails.append(f"design__max_cap_violation__count = {mc}, worse than the "
-                     f"recorded baseline {MAX_CAP_BASELINE} (READINESS.md)")
+                     f"recorded baseline {MAX_CAP_BASELINE} (READINESS.md M9)")
     else:
         print(f"  {'design__max_cap_violation__count':<48} {mc} "
-              f"(open item, baseline {MAX_CAP_BASELINE})")
+              f"(open item M9, baseline {MAX_CAP_BASELINE})")
+
+    # ---- M9: WHICH nets, not how many ------------------------------------
+    viol = max_cap_violators(root)
+    if mc and not viol:
+        notes.append(f"{mc} max-cap violations reported but no post-P&R STA "
+                     f"checks.rpt could be parsed — cannot prove none is a ring node")
+    for corner, rows in sorted(viol.items()):
+        print(f"\nmax-cap violators [{corner}]:")
+        for pin, lim, cap, slack in rows:
+            ring = any(p in pin for p in RING_PATTERNS)
+            print(f"  {pin:<26} limit {lim:.3f}  cap {cap:.4f}  "
+                  f"slack {slack:+.4f}{'   <-- RING NODE' if ring else ''}")
+            if ring:
+                fails.append(
+                    f"max-cap violation on a RING NODE ({corner}): {pin} "
+                    f"cap {cap:.4f} > {lim:.3f}. A loaded oscillator reports the "
+                    f"wrong cell delay — this is the failure H3 was.")
 
     # ---- the LVS verdict itself, not just its error count -----------------
     rpt = find_lvs_report(root)

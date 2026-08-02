@@ -28,7 +28,13 @@ jobs:
       # harden.yml, on a build that was never submitted, while THIS path — the
       # one TinyTapeout actually takes — quietly produced a foundry-cell chip
       # and went green. Never let the submission path ship unaudited again.
+      # `if:` is load-bearing. Without it GitHub skips this step whenever
+      # Build GDS fails — and Build GDS has failed on every run since
+      # 2026-07-25 for an unrelated upstream reason, so blocker 1's guard was
+      # silently inert for eleven days on the very path it protects. The flow
+      # completes all 68 steps and writes the netlist before that failure.
       - name: Zero-foundry audit of the SUBMITTED netlist
+        if: success() || failure()
         run: |
           python3 - << 'EOF'
           import glob, re, sys
