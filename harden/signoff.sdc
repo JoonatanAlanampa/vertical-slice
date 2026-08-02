@@ -58,17 +58,59 @@ if {[info exists ::env(FALLBACK_SDC)] && [file exists $::env(FALLBACK_SDC)]} {
 }
 
 # ------------------------------------------------------- the ring domain
-# Period = the FASTEST predicted ring, because that is the worst case for the
-# counter: ro_clk is a mux of the three, only one enabled at a time, so the
-# prescaler must survive whichever is quickest. From flow/ring_prediction.py
-# on the post-H3 netlist at nom_tt_025C_1v80: INV 914.1 MHz -> 1.094 ns
-# (NAND2 658.3 -> 1.519, NOR2 411.7 -> 2.429).
+# PERIOD IS PER CORNER, and that is not a refinement — a single number is
+# WRONG here. A ring oscillator's period is made of the same cells as the
+# counter it clocks, so the two track: at the slow corner the ring slows down
+# exactly as the counter does. Constraining every corner at the tt period
+# demanded 1.094 ns of a counter built from ss cells while the ss ring
+# physically runs at 1.494 ns — a fast-ring/slow-counter combination that
+# cannot occur in silicon. It produced 5 phantom setup violations, all in
+# this domain, WNS -108 ps (run 30758645627).
 #
-# NOTE this number is a PREDICTION and is known optimistic (M7: no
-# interconnect delay in the SDF, one stage per ring dropped by the loop
-# break). Silicon may well be faster still. Revisit when the rings are
-# measured; if the counter is marginal here it is marginal there.
-set ro_period 1.094
+# Measured per corner with flow/ring_prediction.py on the post-H3 netlist,
+# once the corners became real (M10). Value = the FASTEST of the three rings
+# at that corner, because ro_clk is a mux and the counter must survive
+# whichever ring is selected:
+#
+#     corner              INV     NAND2    NOR2   -> ro_clk period
+#     *_ff_n40C_1v95     1.01     1.27     2.04      1.006  (994 MHz)
+#     *_tt_025C_1v80     1.13     1.54     2.39      1.116  (896 MHz)
+#     *_ss_100C_1v60     1.49     2.28     3.29      1.477  (677 MHz)
+#
+# Each entry is the min across that PVT's nom/min/max interconnect variants,
+# so the constraint is the tightest of the group.
+#
+# These are PREDICTIONS, and M7 makes them optimistic (no interconnect delay
+# in the SDF, one stage per ring dropped by the loop break). Optimistic here
+# means the predicted period is SHORTER than reality, so the counter is being
+# asked to do more than silicon will: the error is on the safe side. Revisit
+# against the first real measurement anyway.
+array set ro_period_by_pvt {
+    ff_n40C_1v95 1.006
+    tt_025C_1v80 1.116
+    ss_100C_1v60 1.477
+}
+set ro_corner "<unset>"
+if {[info exists ::env(_CURRENT_CORNER_NAME)]} {
+    set ro_corner $::env(_CURRENT_CORNER_NAME)
+}
+# Default to the globally fastest ring: if the corner cannot be identified we
+# over-constrain rather than under-constrain, and say so loudly.
+set ro_period 1.006
+set ro_matched 0
+foreach {pvt period} [array get ro_period_by_pvt] {
+    if {[string match "*$pvt*" $ro_corner]} {
+        set ro_period $period
+        set ro_matched 1
+    }
+}
+if {$ro_matched} {
+    puts "signoff.sdc: corner '$ro_corner' -> ro_clk period $ro_period ns"
+} else {
+    puts "signoff.sdc: WARNING corner '$ro_corner' not recognised; falling back"
+    puts "signoff.sdc: to the global fastest ring ($ro_period ns). Expect"
+    puts "signoff.sdc: pessimistic setup results in the ring domain at slow PVT."
+}
 
 # create_clock takes a PIN or a PORT, never a net — passing the net fails with
 # "pins type 'Net' is not..." and kills STA at every corner (run 30755908998).
