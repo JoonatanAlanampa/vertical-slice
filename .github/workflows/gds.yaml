@@ -78,6 +78,26 @@ jobs:
         if: success() || failure()
         run: python3 tools/audit_netlist.py harden/vslice_gates.v
 
+      # The one above audits what synthesis produced. THIS audits what P&R
+      # produced, and it is the one that actually protects the measurement:
+      # ring delay is set by the routed result, and P&R inserts ~155 buffers
+      # (CTS, hold repair, max-cap repair) that synthesis never saw. Measured
+      # on run 30752441492 — none of them lands on a ring node — but "none
+      # this time" is not a property, so assert it on every run.
+      - name: Connectivity audit of the ROUTED netlist
+        if: success() || failure()
+        run: |
+          set -e
+          shopt -s nullglob
+          nl=(runs/*/final/nl/*.nl.v)
+          if [ ${#nl[@]} -eq 0 ]; then
+            echo "no routed netlist found — cannot audit what P&R produced"; exit 1
+          fi
+          for f in "${nl[@]}"; do
+            echo "=== $f ==="
+            python3 tools/audit_netlist.py "$f"
+          done
+
       # Was only ever run in harden.yml, i.e. against the bare die that is
       # never submitted — the same "guard on the wrong artifact" shape as
       # blocker 1. It also used to compare SDF file BYTES, which passes when

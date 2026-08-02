@@ -109,6 +109,13 @@ def parse_netlist(path):
     return instances, ports, assigns
 
 
+# Power pins are not signal connectivity, and the liberty does not declare
+# them at all. The POWERED netlist (final/pnl/*.pnl.v) connects them
+# explicitly, so without this the audit reports every cell as unreasonable
+# and fails on an otherwise clean routed result.
+POWER_PINS = {"VPWR", "VGND", "VPB", "VNB", "VDD", "VSS"}
+
+
 def build_graph(instances, pins, assigns=()):
     """net -> drivers/loads, using liberty directions."""
     drivers, loads = defaultdict(list), defaultdict(list)
@@ -122,7 +129,7 @@ def build_graph(instances, pins, assigns=()):
             unknown.add(cell)
             continue
         for pin, net in conns.items():
-            if not net:
+            if not net or pin in POWER_PINS:
                 continue
             d = pins[cell].get(pin)
             if d == "output":

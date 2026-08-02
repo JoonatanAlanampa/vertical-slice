@@ -18,7 +18,7 @@ pass were also wrong and are corrected below.
 | # | Finding | State |
 | --- | --- | --- |
 | B1 | Submission path built the foundry-cell chip, not the all-own one | ✅ **FIXED** |
-| H3 | Buffers loading the ring oscillators | ✅ **FIXED** — 0 on ring nodes, 0 dangling, audited in CI |
+| H3 | Buffers loading the ring oscillators | ✅ **FIXED** — 0 on ring nodes in the SYNTHESIZED *and* ROUTED netlists; both audited in CI |
 | H4 | Ring select and window length are live during a measurement | ✅ **FIXED** — latched at arm, test proves it |
 | B2 | "No top-level LVS/DRC signoff on the all-own GDS" | ✅ **NOT A GAP** — it runs, is enforced, and matches uniquely; now asserted in CI |
 | M9 | 4 max-cap violations at the `max_*` corners | ⛔ **OPEN — new**, found while closing B2 |
@@ -521,12 +521,27 @@ with no second attempt.
 
 Ranked. The first is worth more than the rest combined.
 
-1. **Does anything downstream of synthesis re-load the ring nodes?** The
-   fanout audit proves the *netlist* is clean, but ring delay is set by the
-   *routed* result. `CTS_CLK_BUFFERS` and `DIODE_CELL` are configured — can a
-   ring node be treated as a clock and buffered, or take an antenna diode,
-   after the audit has passed? If yes, the audit is necessary but not
-   sufficient and H3 is not fully closed.
+1. ✅ **ANSWERED 2026-08-02 — nothing does. H3 is closed at the routed level,
+   not just in synthesis.** This was the question worth more than the rest
+   combined, so it was settled rather than left for a reviewer. P&R inserts
+   **~155 buffers synthesis never saw** (102 `BUF_X2` + 69 `BUF_X4` + 8
+   `BUF_X1` in the routed netlist, against 16 `BUF_X2` in
+   `vslice_gates.v`) — CTS, hold repair and max-cap repair. The audit run
+   against `final/nl/*.nl.v` and `final/pnl/*.pnl.v` from run `30752441492`:
+
+   ```
+   [2] ring census          : OK (93 stage cells)
+   [3] no dangling outputs  : OK
+   [4] ring node fanout     : OK (each stage -> 1 stage; 3 taps)
+   ```
+
+   Not vacuous: the routed netlist still carries 267 `u_stage` references, so
+   the check really found the rings. `DIODE_X1` count is **0** — no antenna
+   diode was inserted anywhere on the die (antenna violations were 0, so none
+   was needed). **The rings reach silicon with exactly one load per node.**
+
+   Now asserted on every run: `gds.yaml` audits the ROUTED netlist as well as
+   the committed one. "None this time" is not a property.
 2. **M10** — what collapses the corner spread between pre-PnR (6.2%) and
    signoff (0.2%), given `EXTRA_LIBS` cannot simply be removed? Name the
    LibreLane 3.0.x mechanism.
