@@ -324,10 +324,15 @@ intact**, which is the premise the whole comparison rests on.
 ## What is left, in order
 
 1. ~~H3~~ ✅ ~~H4~~ ✅ ~~B2~~ ✅ — done 2026-08-02, see above.
-2. **One green `gds` run.** Everything above is verified locally (8/8 cocotb,
-   9/9 bring-up, both audits pass on the regenerated netlist) but the netlist
-   changed, so the signoff numbers quoted here are from the *previous* one.
-   They are re-asserted automatically now: `check_signoff.py` runs in CI.
+2. ~~One green `gds` run~~ ✅ **the flow itself is confirmed clean on the new
+   netlist** (run `30752441492`, commit `0a86598`): LVS *Circuits match
+   uniquely* 6958 devices / 3028 nets, magic DRC 0, routing DRC 0,
+   antenna/PDN/slew/fanout 0, zero-foundry clean on **both** `nl.v` and
+   `pnl.v`, and the fanout audit passes. All three audit steps green. Local:
+   8/8 cocotb, 9/9 bring-up. `harden` (bare die) also green at `f2737a3`.
+   The **badge is still red** — item 3 — because `Build GDS` dies after the
+   flow finishes. That is now the ONLY thing between this repo and a green
+   submission path.
 3. **The red badge.** Upstream `tt-gds-action` defect, unrelated to the chip,
    and it blocks submission on its own. ⛔ Do NOT retry the linter-config
    route — two workarounds are burned and recorded below. Honest routes: an
