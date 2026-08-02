@@ -7,13 +7,23 @@ and koti are FPGA targets, ServoCtl-8 and TinyRV32 are finished portfolio
 pieces, CORDIC-1 is already submitted and paid. There is no second chance and
 no other vehicle for the physics→cells→silicon claim.
 
-## Verdict: **the measurement is fixed; one signoff item and the red badge remain.**
+## Verdict: **`gds` is GREEN. All four jobs pass, including TT's own precheck.**
 
-Updated 2026-08-02 (second pass). H3 and H4 are closed in the RTL and the
-netlist is regenerated; B2 turned out to be **misdirected** — the signoff it
-said was missing is present, enforced and passing on the submitted build, and
-what was actually missing was anyone reading it. Two numbers in the previous
-pass were also wrong and are corrected below.
+Third pass, 2026-08-02/03. The badge that had been red since 2026-07-25 is
+green at `c029720`, and so are `test` and `docs`:
+
+```
+gds: success   precheck: success   gl_test: success   viewer: success
+```
+
+Every audit in the submission path passes with it: zero-foundry on the
+submitted netlist, the signoff numbers (LVS unique, DRC/antenna/PDN clean,
+`ro_clk` constrained), the connectivity audit of the committed **and** routed
+netlists, and — for the first time — a real corner spread.
+
+What that unblocks is the *mechanics* of submitting. It is not by itself a
+recommendation to pay; see "What is left" at the end, which is now a short
+and honest list rather than a wall.
 
 | # | Finding | State |
 | --- | --- | --- |
@@ -21,13 +31,13 @@ pass were also wrong and are corrected below.
 | H3 | Buffers loading the ring oscillators | ✅ **FIXED** — 0 on ring nodes in the SYNTHESIZED *and* ROUTED netlists; both audited in CI |
 | H4 | Ring select and window length are live during a measurement | ✅ **FIXED** — latched at arm, test proves it |
 | B2 | "No top-level LVS/DRC signoff on the all-own GDS" | ✅ **NOT A GAP** — it runs, is enforced, and matches uniquely; now asserted in CI |
-| M9 | 4 max-cap violations at the `max_*` corners | ⛔ **OPEN — new**, found while closing B2 |
-| — | `gds` workflow red since 2026-07-25 | 🟡 **DIAGNOSED, not fixed** — upstream defect, not the chip. Still blocks submission |
+| M9 | max-cap violations (8, clock tree + repair buffers) | 🟡 **OPEN, characterised** — no ring node at any corner; worst 17% over |
+| — | `gds` workflow red since 2026-07-25 | ✅ **GREEN** — the linter now runs clean via `CELL_VERILOG_MODELS`, so the upstream `cat` finds its log |
 | M5 | Documented read sequence permits a torn 24-bit count | ✅ **FIXED** — doc bug only; hardware and bring-up script were already correct |
 | M6 | Prescaler in the RO clock domain has no generated-clock constraint | ✅ **CLOSED** — signoff SDC added; the counter closes at 1.094 ns with 266 ps slack |
-| M7 | `ring_prediction.py` may sum cell delays only, not interconnect | ⛔ **CONFIRMED, different cause** — the SDF has no interconnect to sum, and drops a stage |
+| M7 | `ring_prediction.py` may sum cell delays only, not interconnect | 🟡 **CONFIRMED, different cause** — no interconnect in the SDF, one stage dropped; a decision, not a defect |
 | L8 | User-facing text quotes one PVT although `lib.lock` pins three | ✅ **FIXED** — text corrected, and the stated *reason* was wrong (see M10) |
-| M10 | **Corner-aware STA is not in effect.** Only 0.2% of cell delay arcs move between PVT views | ⛔ **NEW — the biggest open finding** |
+| M10 | Corner-aware STA was not in effect (0.2% of arcs moved between PVT views) | ✅ **FIXED** — now **98.5%**, max delta 155% |
 
 **Still do not pay.** What is left is M10 (the timing signoff is single-PVT),
 M7 (the prediction the chip is measured against has no wire delay and drops a
@@ -533,36 +543,31 @@ with no second attempt.
 
 ## What is left, in order
 
-1. ~~H3~~ ✅ ~~H4~~ ✅ ~~B2~~ ✅ — done 2026-08-02, see above.
-2. ~~One green `gds` run~~ ✅ **the flow itself is confirmed clean on the new
-   netlist** (run `30752441492`, commit `0a86598`): LVS *Circuits match
-   uniquely* 6958 devices / 3028 nets, magic DRC 0, routing DRC 0,
-   antenna/PDN/slew/fanout 0, zero-foundry clean on **both** `nl.v` and
-   `pnl.v`, and the fanout audit passes. All three audit steps green. Local:
-   8/8 cocotb, 9/9 bring-up. `harden` (bare die) also green at `f2737a3`.
-   The **badge is still red** — item 3 — because `Build GDS` dies after the
-   flow finishes. That is now the ONLY thing between this repo and a green
-   submission path.
-3. **The red badge.** Upstream `tt-gds-action` defect, unrelated to the chip,
-   and it blocks submission on its own. ⛔ Do NOT retry the linter-config
-   route — two workarounds are burned and recorded below. Honest routes: an
-   upstream issue/PR, or synthesis-only blackbox stubs OpenSTA also accepts.
-4. **M10 — corner-aware STA is not in effect.** The largest open item: the
-   whole timing signoff is single-PVT. Start at `EXTRA_LIBS` in both configs.
-5. ~~M6~~ ✅ closed 2026-08-02 — the ring domain is constrained and the
-   prescaler meets timing with 266 ps of slack (~32% frequency headroom).
-6. **M9** (max-cap, 6 at the `max_*` corners) — clock tree and OpenROAD's own
-   repair buffers; not on the measurement path.
-7. **M7** — decide whether a prediction with no wire delay and one dropped
-   stage is good enough to compare silicon against, or whether the SDF needs
-   real parasitic annotation first. This is the yardstick the chip is built
-   to be measured against, so "good enough" has to be an explicit decision.
-8. ~~M5, L8~~ ✅ closed 2026-08-02.
-9. **One adversarial review pass before paying** — Claude-side, at
-   `/effort xhigh`, since cross-provider review was retired 2026-08-02 and
-   this is now ordinary work. The questions it has to answer are below; they
-   were written as a review brief and are kept because they are the sharpest
-   open uncertainties, not because of who was going to answer them.
+`gds` is green, so nothing below blocks the *mechanics* of submitting. These
+are the reasons to think before paying.
+
+1. **M7 — decide whether the prediction is a fit yardstick.** This is the only
+   item that touches the chip's purpose. The predicted counts have **no
+   interconnect delay at all** (every ring `INTERCONNECT` arc in the SDF is
+   0.000) and **drop one stage per ring** to OpenSTA's loop break, so they are
+   optimistic by at least ~3% plus however much the wires are worth. When
+   silicon disagrees, that gap is the first thing anyone will ask about.
+   "Accept and document the bias" is a perfectly good answer — but it should
+   be a decision, not an oversight.
+2. **M9 — max-cap, 8 violations**, all clock-tree or OpenROAD's own repair
+   buffers, worst 17% over the library's own 0.100 limit, **no ring node at
+   any of the nine corners**. Not on the measurement path. Likely levers: a
+   stronger `CTS_ROOT_BUFFER`, or more clock-tree levels.
+3. **The review brief below** — 7 of its 8 questions are still unanswered
+   (#1 was answered: nothing re-loads the ring nodes in the routed netlist).
+4. **Re-read the predicted counts in `docs/info.md`.** They were regenerated
+   from the fixed netlist at the *old* single-PVT timing. Corners are real
+   now, so per-corner ring predictions exist for the first time (ff 1.01 ns /
+   tt 1.13 / ss 1.49) and the doc still quotes a single number.
+
+**What is no longer a reason to wait**: the badge, the connectivity signoff,
+the corner spread, the untimed ring domain, and both silent-corruption bugs
+in the measurement itself.
 
 ## The review brief — what a pre-payment pass must actually answer
 
