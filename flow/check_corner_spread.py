@@ -99,6 +99,17 @@ def main():
     # was identical at ff(-40C,1.95V) and ss(100C,1.60V), which is impossible
     # for real corner-aware STA. A header is not a timing model, so compare
     # the delays themselves.
+    # A run dir holds SDFs from several STA steps (pre-PnR, mid-PnR,
+    # post-PnR) whose corner subdirectories share names, so keying on the
+    # parent name alone silently mixes them: CI compared the PRE-PnR set and
+    # reported 6.2% while the post-PnR set is 0.2%. Signoff is the post-PnR
+    # one — pick the latest STA step present and say which.
+    steps = sorted({s.parent.parent.name for s in sdfs})
+    post = [x for x in steps if "stapostpnr" in x]
+    chosen = post[-1] if post else (steps[-1] if steps else None)
+    if chosen:
+        sdfs = [s for s in sdfs if s.parent.parent.name == chosen]
+        print(f"  (using {chosen}; steps present: {', '.join(steps)})")
     by_corner = {}
     for s in sdfs:
         txt = s.read_text(errors="replace")

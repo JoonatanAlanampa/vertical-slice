@@ -400,11 +400,31 @@ have identical cell delays. Of the 28 lines that differ across the whole
 `INTERCONNECT` arcs on the `clk`/`rst_n` input ports.
 
 **It affects both builds** — the submitted `runs/wokwi` and the bare-die
-`harden/runs` measure the same 0.2%. So the lib-v1.1 "corner-aware re-pin",
-believed landed and CI-proven since 2026-07-22, has never been in effect for
-the own cells. The likely mechanism is the one its own author wrote down:
-`EXTRA_LIBS: ["dir::../lib/own_hardening.lib"]` puts the single nominal view
-into every corner alongside the corner-keyed `LIB`.
+`harden/runs` measure the same 0.2% at signoff. So the lib-v1.1 "corner-aware
+re-pin", believed landed and CI-proven since 2026-07-22, is not in effect for
+the own cells where it matters.
+
+**The mechanism is NOT yet pinned down, and the obvious guess is wrong.**
+Measured at two points in the same run:
+
+| STA step | arcs differing ff vs ss | max delta |
+| --- | --- | --- |
+| `08-openroad-staprepnr` (pre-PnR) | 290 / 4708 = **6.2%** | **88.0%** |
+| `51-openroad-stapostpnr` (signoff) | 11 / 4884 = **0.2%** | 12.4% |
+
+If `EXTRA_LIBS: ["dir::../lib/own_hardening.lib"]` simply forced the nominal
+view into every corner — the mechanism its own author predicted — pre-PnR
+would be flat too. It is not: pre-PnR carries real spread on a minority of
+arcs, and that spread has all but vanished by signoff. So something in P&R or
+in SDF writing collapses toward a single view. **Both numbers still fail the
+bar** (real corner-aware STA moves essentially every arc, not 6%), so the
+finding holds either way — but do not fix `EXTRA_LIBS` and assume it is done.
+Verify against this table.
+
+(That 6.2%-vs-0.2% split was itself nearly missed: a run directory holds SDFs
+from several STA steps whose corner subdirectories share names, so the first
+version of the strengthened check silently compared the pre-PnR set. It now
+selects the post-PnR step and prints which one it used.)
 
 **Why nobody saw it.** `flow/check_corner_spread.py` exists precisely to catch
 this and has been passing — because its SDF test asserted only that the files
