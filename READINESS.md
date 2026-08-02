@@ -16,7 +16,7 @@ come back **wrong**, and nothing in the current signoff would say so.
 | # | Finding | State at HEAD |
 | --- | --- | --- |
 | B1 | Submission path built the foundry-cell chip, not the all-own one | ✅ **FIXED** |
-| — | `gds` workflow red since 2026-07-25 | ✅ **FIXED 2026-08-02** (cause was CI plumbing, see below) |
+| — | `gds` workflow red since 2026-07-25 | 🟡 **DIAGNOSED, not fixed** — upstream defect, not the chip |
 | B2 | No top-level LVS/DRC signoff on the all-own GDS | ⛔ **OPEN** |
 | H3 | 112 dangling `BUF_X2` loading the ring oscillators | ⛔ **OPEN — this is the one that corrupts the measurement** |
 | H4 | Ring select and window length are live during a measurement | ⛔ **OPEN** |
@@ -55,10 +55,30 @@ cat $LINTER_LOG
 `RUN_LINTER: 0` makes LibreLane skip `Verilator.Lint` entirely, so that
 directory never exists, `cat` exits 1, and the whole **Build GDS** step fails
 after the work is done — taking `precheck`, `gl_test` and `viewer` with it.
-Confirmed not fixed upstream by a fresh dispatch today (run `30748353796`,
-identical failure). Fixed here by running the linter while keeping the three
-`Checker.Lint*` gates off, so the log exists and nothing it says can fail the
-build.
+Confirmed still present upstream by a fresh dispatch today (run `30748353796`,
+identical failure).
+
+**Two workarounds were tried and both are dead ends. Do not repeat them:**
+
+1. `RUN_LINTER: 1` plus `Checker.LintErrors` / `LintWarnings` /
+   `LintTimingConstructs` set false — LibreLane answered *"An unknown key … was
+   provided"* for all three. Those are step IDs, not config variables. The
+   linter then ran (the log appeared, which is what the `cat` needed) but
+   emitted `%Error-MODMISSING` per own-cell instance: a gate netlist naming
+   `INV_X1`/`NAND2_X1`/`NOR2_X1` has no module bodies in scope. Run
+   `30748790446`.
+2. …plus `EXTRA_VERILOG_MODELS: ["dir::../sim/own_cells.v"]` to supply those
+   bodies. MODMISSING went to zero — but that variable is consumed by **OpenSTA
+   as well as the linter**, and behavioural models are not valid STA input. The
+   flow died *earlier* than before, at `STA (Pre-PnR)`. Run `30748956528`.
+
+Reverted to `RUN_LINTER: 0`, the setting that builds a **correct** chip. Correct
+beats green. The real fix is either an upstream guard on that `cat`, or
+synthesis-only blackbox stubs that OpenSTA will also accept.
+
+**This does block submission** — TinyTapeout gates on the workflow being green.
+It is not, however, the thing to fix first: H3 below requires regenerating the
+netlist anyway, so a fresh green run is needed regardless of what is done here.
 
 ## H3 — 112 dangling `BUF_X2`. **The one that would ruin the experiment.**
 
