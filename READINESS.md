@@ -511,7 +511,44 @@ with no second attempt.
    real parasitic annotation first. This is the yardstick the chip is built
    to be measured against, so "good enough" has to be an explicit decision.
 8. ~~M5, L8~~ ✅ closed 2026-08-02.
-9. Re-run the Codex bridge on the result before paying.
+9. **One adversarial review pass before paying** — Claude-side, at
+   `/effort xhigh`, since cross-provider review was retired 2026-08-02 and
+   this is now ordinary work. The questions it has to answer are below; they
+   were written as a review brief and are kept because they are the sharpest
+   open uncertainties, not because of who was going to answer them.
+
+## The review brief — what a pre-payment pass must actually answer
+
+Ranked. The first is worth more than the rest combined.
+
+1. **Does anything downstream of synthesis re-load the ring nodes?** The
+   fanout audit proves the *netlist* is clean, but ring delay is set by the
+   *routed* result. `CTS_CLK_BUFFERS` and `DIODE_CELL` are configured — can a
+   ring node be treated as a clock and buffered, or take an antenna diode,
+   after the audit has passed? If yes, the audit is necessary but not
+   sufficient and H3 is not fully closed.
+2. **M10** — what collapses the corner spread between pre-PnR (6.2%) and
+   signoff (0.2%), given `EXTRA_LIBS` cannot simply be removed? Name the
+   LibreLane 3.0.x mechanism.
+3. **M6** — is an 8-bit counter clocked at ~914 MHz actually feasible on our
+   own DFF_X1 (clk→Q 158-300 ps)? If not, the prescaler miscounts and the
+   instrument lies while reporting `valid`.
+4. **Did removing `(* keep *)` cost anything else?** All 93 stage cells
+   survive, and the RTL argues liberty instances are opaque to yosys — try to
+   refute that for the enable leg, the loop-closure wire `fb`, and `osc`.
+5. **H4 completeness** — is anything else read live inside a measurement?
+   `run`, the byte-select mux, the mode strap `ui[7]`. Can a mid-window
+   `ui[7]` flip corrupt a count that still reports `valid`?
+6. **M7** — is a prediction with no wire delay and one dropped stage a fit
+   yardstick for the comparison this chip exists to make?
+7. **Can the new audits pass vacuously?** `audit_netlist.py`,
+   `check_signoff.py` and `check_corner_spread.py` are what future sessions
+   will trust. The defect they exist for survived two earlier audits, so an
+   audit that can lie is a first-class bug here.
+8. **Sweep for the two failure shapes this repo keeps producing**: a guard on
+   an artifact that is not the one submitted, and a guard asserting a proxy
+   (bytes, counts, names) instead of the property. Three instances found on
+   2026-08-02; assume there are more.
 
 **Nobody should pay against this repo until 2-7 are closed.** The measurement
 circuit itself is now sound, which it was not this morning; what is unsound is
