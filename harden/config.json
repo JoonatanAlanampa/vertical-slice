@@ -14,6 +14,15 @@
   "ERROR_ON_NL_ASSIGN_STATEMENTS": false,
 
   "CLOCK_PORT": "clk",
+
+  "//": "SIGNOFF-ONLY SDC (READINESS.md M6). Gives STA the ring-oscillator",
+  "//": "clock domain so the prescaler - an 8-bit counter clocked directly by",
+  "//": "the ring at a predicted 914 MHz - is actually timed. Until 2026-08-02",
+  "//": "there was no SDC at all and that counter had never been checked.",
+  "//": "*** DO NOT ALSO SET THIS AS PNR_SDC_FILE. *** If CTS sees ro_clk as a",
+  "//": "clock it builds a clock tree on it, i.e. buffers on the ring nodes -",
+  "//": "the H3 defect arriving by another road. See the header of the file.",
+  "SIGNOFF_SDC_FILE": "dir::signoff.sdc",
   "CLOCK_PERIOD": 20,
 
   "//": "lib-v1.1 corner-aware re-pin: one timing view PER CORNER (ported from",

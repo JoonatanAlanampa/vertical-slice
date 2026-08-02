@@ -129,6 +129,15 @@
   "//": "https://tinytapeout.com/faq/#how-can-i-map-an-additional-external-clock-to-one-of-the-gpios",
   "CLOCK_PORT": "clk",
 
+  "//": "SIGNOFF-ONLY SDC (READINESS.md M6). Gives STA the ring-oscillator",
+  "//": "clock domain so the prescaler - an 8-bit counter clocked directly by",
+  "//": "the ring at a predicted 914 MHz - is actually timed. Until 2026-08-02",
+  "//": "there was no SDC at all and that counter had never been checked.",
+  "//": "*** DO NOT ALSO SET THIS AS PNR_SDC_FILE. *** If CTS sees ro_clk as a",
+  "//": "clock it builds a clock tree on it, i.e. buffers on the ring nodes -",
+  "//": "the H3 defect arriving by another road. See the header of the file.",
+  "SIGNOFF_SDC_FILE": "dir::../harden/signoff.sdc",
+
   "//": "Configuration docs: https://librelane.readthedocs.io/en/latest/reference/configuration.html",
 
   "//": "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!",

@@ -199,6 +199,27 @@ def main():
                 fails.append(f"LVS compared only {a} devices (< {MIN_DEVICES}) — "
                              f"that is not this design; refusing to call it signoff")
 
+    # ---- M6: the ring domain must actually be constrained -----------------
+    # The failure mode being guarded is not "the prescaler is slow", it is
+    # "nobody defined the clock, so STA never looked". That is invisible in
+    # every metric above — an unconstrained domain reports zero violations,
+    # which reads exactly like success.
+    clk_rpts = sorted(glob.glob(f"{root}/**/*-openroad-stapostpnr/*/clock.rpt",
+                                recursive=True))
+    if not clk_rpts:
+        notes.append("no post-P&R clock.rpt found — cannot confirm the ring "
+                     "clock is constrained (M6)")
+    else:
+        txt = Path(clk_rpts[0]).read_text(errors="replace")
+        if "ro_clk" in txt:
+            print("\n[M6] ring clock  : ro_clk present in STA clock list")
+        else:
+            fails.append(
+                f"ro_clk is NOT among the clocks STA analysed ({clk_rpts[0]}). "
+                f"The prescaler runs at the ring frequency; an unconstrained "
+                f"domain reports zero violations because nothing checked it. "
+                f"See harden/signoff.sdc and READINESS.md M6.")
+
     if notes:
         print("\nnotes:")
         for n in notes:
