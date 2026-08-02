@@ -404,22 +404,42 @@ have identical cell delays. Of the 28 lines that differ across the whole
 re-pin", believed landed and CI-proven since 2026-07-22, is not in effect for
 the own cells where it matters.
 
-**The mechanism is NOT yet pinned down, and the obvious guess is wrong.**
-Measured at two points in the same run:
+**Mechanism — identified.** (An earlier revision of this section called the
+`EXTRA_LIBS` hypothesis refuted, on the strength of the pre-PnR number below.
+That was wrong; the direct evidence points straight at it.)
+
+Three facts settle it:
+
+1. **The libraries are fine.** 100% of `cell_rise`/`cell_fall` values differ
+   between `own_hardening_ff_n40C_1v95.lib` and `..._ss_100C_1v60.lib` (max
+   delta 13104%). The characterization is genuinely corner-aware.
+2. **The config is fine.** The resolved `LIB` at the signoff STA step keys the
+   correct own lib to each corner.
+3. **`own_hardening.lib` — the file `EXTRA_LIBS` injects into all nine corners
+   — is byte-identical to the tt view.** Same sha256 `47cd2a3cd8c7037c` as
+   `own_hardening_tt_025C_1v80.lib`, in `lib.lock` and on disk.
+
+So every corner is handed a second definition of every own cell carrying **tt**
+timing, and that is what comes out: at signoff, ff and ss agree with tt on
+99.8% of arcs, when the liberty says ff should be faster than tt by up to
+5673%. A fast corner reporting nominal delays is the override, not physics.
+
+The two-step measurement, kept because the fix must move both numbers:
 
 | STA step | arcs differing ff vs ss | max delta |
 | --- | --- | --- |
 | `08-openroad-staprepnr` (pre-PnR) | 290 / 4708 = **6.2%** | **88.0%** |
 | `51-openroad-stapostpnr` (signoff) | 11 / 4884 = **0.2%** | 12.4% |
 
-If `EXTRA_LIBS: ["dir::../lib/own_hardening.lib"]` simply forced the nominal
-view into every corner — the mechanism its own author predicted — pre-PnR
-would be flat too. It is not: pre-PnR carries real spread on a minority of
-arcs, and that spread has all but vanished by signoff. So something in P&R or
-in SDF writing collapses toward a single view. **Both numbers still fail the
-bar** (real corner-aware STA moves essentially every arc, not 6%), so the
-finding holds either way — but do not fix `EXTRA_LIBS` and assume it is done.
-Verify against this table.
+Pre-PnR retaining a little spread is a secondary puzzle, not a refutation —
+both numbers are far below what real corner-aware STA produces.
+
+**Candidate fix**: drop `own_hardening.lib` from `EXTRA_LIBS` in both configs,
+since the corner-keyed `LIB` already supplies the own cells per corner.
+`EXTRA_LIBS` is a leftover from lib-v1.0, when a single nominal view was all
+there was; the v1.1 re-pin added the `LIB` dict and never removed it. The risk
+is that some flow step relies on a corner-independent liberty, so this needs a
+CI round-trip to confirm rather than reasoning.
 
 (That 6.2%-vs-0.2% split was itself nearly missed: a run directory holds SDFs
 from several STA steps whose corner subdirectories share names, so the first

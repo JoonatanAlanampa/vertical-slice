@@ -37,7 +37,17 @@
       "dir::../lib/own_hardening_ff_n40C_1v95.lib"
     ]
   },
-  "EXTRA_LIBS": ["dir::../lib/own_hardening.lib"],
+  "//": "NO EXTRA_LIBS - removed 2026-08-02, READINESS.md M10. own_hardening.lib",
+  "//": "is BYTE-IDENTICAL to the tt corner view (sha 47cd2a3c, see lib.lock), and",
+  "//": "LibreLane loads EXTRA_LIBS into EVERY timing corner, so listing it handed",
+  "//": "tt timing to ff and ss alike: at signoff ff agreed with tt on 99.8% of",
+  "//": "arcs when the liberty says it should be up to 5673% faster. The whole",
+  "//": "timing signoff was single-PVT wearing three labels. The corner-keyed LIB",
+  "//": "above already supplies the own cells per corner.",
+  "//": "IF THIS BREAKS yosys elaborate (the note above claimed EXTRA_LIBS was",
+  "//": "kept ONLY so elaborate could blackbox our cells), the answer is NOT to",
+  "//": "put it back as-is - that reinstates the bug. Give elaborate a liberty",
+  "//": "that is not also a timing view, or find the LibreLane knob that scopes it.",
   "EXTRA_LEFS": ["dir::../lib/own.lef"],
   "EXTRA_GDS_FILES": ["dir::../lib/own_cells.gds"],
 
