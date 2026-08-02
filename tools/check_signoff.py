@@ -62,11 +62,16 @@ MUST_BE_ZERO = [
     "synthesis__check_error__count",
 ]
 
-# Open item, deliberately not zero (READINESS.md M9). Measured 6 at f2737a3,
-# was 4 at 2312cf2 — the netlist was re-mapped by the H3/H4 fixes, so the
-# violating nets are not the same ones. The count gate is only "do not get
-# worse"; the gate that actually matters is RING_SAFE below.
-MAX_CAP_BASELINE = 6
+# Open item, deliberately not zero (READINESS.md M9). History: 4 at 2312cf2,
+# 6 at f2737a3 (the H3/H4 fixes re-mapped the netlist), and 8 once M10 was
+# fixed. That last move is NOT a regression and the earlier numbers are not
+# comparable: 4 and 6 were counted while every corner carried tt timing, so
+# they were never a multi-corner count at all. 8 is the first honest one.
+#
+# Raising a baseline to make a check pass is exactly the sin this file exists
+# to prevent, so the justification has to be that the OLD number was invalid
+# rather than that the new one is inconvenient. It was: see M10.
+MAX_CAP_BASELINE = 8
 
 # The one max-cap violation that would matter. A ring node over its cap limit
 # is a loaded oscillator, i.e. the wrong delay reported as the right one —
