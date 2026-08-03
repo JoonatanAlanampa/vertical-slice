@@ -39,11 +39,13 @@ and honest list rather than a wall.
 | L8 | User-facing text quotes one PVT although `lib.lock` pins three | ✅ **FIXED** — text corrected, and the stated *reason* was wrong (see M10) |
 | M10 | Corner-aware STA was not in effect (0.2% of arcs moved between PVT views) | ✅ **FIXED** — now **98.5%**, max delta 155% |
 
-**Still do not pay.** What is left is M10 (the timing signoff is single-PVT),
-M7 (the prediction the chip is measured against has no wire delay and drops a
-stage), M9 (max-cap on the clock tree), and the red badge, which blocks
-submission by itself. Everything that could make the *measurement* wrong is
-closed and audited in CI.
+**Still do not pay — but the list is now short, and none of it is
+construction.** What is left is **M7** (the prediction the chip is measured
+against has no wire delay and drops one stage per ring, so it is optimistic —
+a decision to take, not a defect to fix), **M9** (max-cap on the clock tree,
+no ring node at any corner), and **5 of the 8 questions in the review brief**.
+M10, M6 and the red badge are closed. Everything that could make the
+*measurement* wrong is closed and audited in CI.
 
 ---
 
@@ -448,7 +450,44 @@ spread is missing further downstream — see M10. Text corrected in both the
 script and `docs/info.md`, which now carries the predicted numbers with all
 three caveats attached.
 
-## M10 — **corner-aware STA is not actually in effect.** NEW, and the biggest one.
+## M10 — corner-aware STA was not in effect. **FIXED 2026-08-02.**
+
+**Resolution first; the diagnosis below is kept because it is the reasoning
+that found it, and because two of its statements were wrong on the way.**
+
+`CELL_VERILOG_MODELS` is the variable that separates the two roles
+`EXTRA_LIBS` was doing at once. `yosys.py` and `pyosys.py` pass it through
+`create_blackbox_model()`, so elaborate gets port declarations with no bodies
+— which is the only thing `EXTRA_LIBS` was still needed for — and **no
+OpenROAD or OpenSTA code reads it**, so nothing overrides the corner-keyed
+`LIB`. `EXTRA_LIBS` is now absent from both configs (`929b690`), and the
+finding is recorded inline in each.
+
+| | before | after |
+| --- | --- | --- |
+| arcs differing ff vs ss at signoff | 11 / 4884 = **0.2%** | **98.5%** |
+| max delta | 12.4% | **155%** |
+
+⚠️ **Fixing it immediately exposed 5 setup violations at `ss` (WNS −108 ps),
+all in the ring domain — and they were artifacts of my own M6 constraint, not
+of the chip.** A ring's period is built from the same cells as the counter it
+clocks, so the two track: constraining every corner at the tt-derived 1.094 ns
+demanded that period of a counter made of `ss` cells, a fast-ring/slow-counter
+pairing that cannot occur in silicon. `harden/signoff.sdc` is now per corner,
+keyed on `_CURRENT_CORNER_NAME`, from `ring_prediction.py` run against the
+newly-real per-corner SDFs: **ff 1.006 / tt 1.116 / ss 1.477 ns** (the fastest
+ring at each corner, since `ro_clk` is a mux). An unknown corner falls back to
+the globally fastest ring and says so, so the failure mode is over-constrained
+and loud. **That constraint was not derivable at all before this fix** — with
+every corner carrying tt timing, all nine SDFs predicted the same ring.
+
+`flow/check_corner_spread.py` measures the property directly (a majority of
+arcs must move) and runs in `gds.yaml` as well as `harden.yml`, so this cannot
+quietly regress on the submitted path. Green at `c029720`.
+
+---
+
+### (the diagnosis, as written while it was open)
 
 Between `ff_n40C_1v95` (-40 C, 1.95 V) and `ss_100C_1v60` (100 C, 1.60 V),
 **11 of 4884 cell delay arcs differ — 0.2%.** Ordinary logic cell `_3140_`
@@ -506,15 +545,22 @@ cells, exactly as `harden/config.json` claimed. It is simultaneously
 load-bearing and the cause of M10. Reverted in `4b1cb98`; both configs now
 carry the finding inline so the next person does not repeat the experiment.
 
-**So the fix has to separate the two roles**, and none of these is verified —
-this is the open work:
+**So the fix has to separate the two roles.** Three candidates were written
+down here; ✅ **the second one is what landed** (see the resolution at the top
+of this section):
 
 - a liberty for elaborate that carries **cell and pin definitions but no
   timing tables**, so that even loaded into every corner it has nothing to
-  override with (needs checking that yosys accepts it and OpenSTA ignores it);
-- or a LibreLane knob that scopes an extra liberty to synthesis only — worth
-  grepping the installed librelane 3.0.x for, the way the console session
-  found the real `PL_RESIZER_*` variables;
+  override with (needs checking that yosys accepts it and OpenSTA ignores it)
+  — not needed in the end;
+- ✅ **or a LibreLane knob that scopes an extra liberty to synthesis only —
+  worth grepping the installed librelane 3.0.x for, the way the console
+  session found the real `PL_RESIZER_*` variables.** This was the answer:
+  grepping 3.0.5 found `CELL_VERILOG_MODELS`, read only by
+  `verilator.py`/`yosys.py`/`pyosys.py`. **The lesson generalises — the
+  variable that has the property you need is findable by reading the installed
+  tool, and two CI cycles were spent guessing at ones that merely looked
+  right.**
 - ⛔ **not** `EXTRA_VERILOG_MODELS` with blackbox stubs. That was already
   burned during the linter saga: OpenSTA reads the same variable and dies at
   `STA (Pre-PnR)` (run 30748956528).
@@ -536,10 +582,11 @@ which is the correct answer. It was also only ever run in `harden.yml`, never
 against the submitted chip — the same "guard on the wrong artifact" shape as
 blocker 1 and the skipped zero-foundry step. It now runs in `gds.yaml` too.
 
-Consequence for the tapeout: the "10.5 ns of setup slack" and the clean
-hold/slew/cap signoff are **single-PVT results wearing three PVT labels**.
-Nothing has been verified at the slow corner. That is a real gap on a chip
-with no second attempt.
+Consequence for the tapeout, **as it stood while this was open**: the "10.5 ns
+of setup slack" and the clean hold/slew/cap signoff were **single-PVT results
+wearing three PVT labels**, with nothing verified at the slow corner. That is
+no longer the case — signoff now runs against real ff/tt/ss timing, and the
+slow corner is where the M6 constraint had to be corrected before it passed.
 
 ## What is left, in order
 
@@ -558,8 +605,10 @@ are the reasons to think before paying.
    buffers, worst 17% over the library's own 0.100 limit, **no ring node at
    any of the nine corners**. Not on the measurement path. Likely levers: a
    stronger `CTS_ROOT_BUFFER`, or more clock-tree levels.
-3. **The review brief below** — 7 of its 8 questions are still unanswered
-   (#1 was answered: nothing re-loads the ring nodes in the routed netlist).
+3. **The review brief below** — **5 of its 8 questions are still open.**
+   Answered: #1 (nothing re-loads the ring nodes in the routed netlist), #2
+   (the M10 mechanism, named and fixed) and #3 (the counter does close against
+   a 914 MHz ring, ~32% headroom, at every corner).
 4. **Re-read the predicted counts in `docs/info.md`.** They were regenerated
    from the fixed netlist at the *old* single-PVT timing. Corners are real
    now, so per-corner ring predictions exist for the first time (ff 1.01 ns /
@@ -594,12 +643,19 @@ Ranked. The first is worth more than the rest combined.
 
    Now asserted on every run: `gds.yaml` audits the ROUTED netlist as well as
    the committed one. "None this time" is not a property.
-2. **M10** — what collapses the corner spread between pre-PnR (6.2%) and
-   signoff (0.2%), given `EXTRA_LIBS` cannot simply be removed? Name the
-   LibreLane 3.0.x mechanism.
-3. **M6** — is an 8-bit counter clocked at ~914 MHz actually feasible on our
-   own DFF_X1 (clk→Q 158-300 ps)? If not, the prescaler miscounts and the
-   instrument lies while reporting `valid`.
+2. ✅ **ANSWERED — M10.** The mechanism was `EXTRA_LIBS` injecting the
+   tt-identical `own_hardening.lib` into all nine corners; the LibreLane 3.0.x
+   variable that separates blackboxing from timing is `CELL_VERILOG_MODELS`.
+   Fixed and measured: the spread is **98.5%** of arcs. **Residual question a
+   reviewer could still take**: why did pre-PnR retain 6.2% while signoff
+   collapsed to 0.2%, if both were fed the same override?
+3. ✅ **ANSWERED — M6, and the answer is yes.** The prescaler meets timing
+   with **266 ps of slack and zero violations**; the data path holds to
+   ~1.21 GHz against rings predicted at 914 MHz, ~32% headroom. It now closes
+   **per corner** (ff 1.006 / tt 1.116 / ss 1.477 ns). ⚠️ The margin is
+   measured against a prediction known to be optimistic (M7), so silicon
+   ringing faster eats it directly — **1.21 GHz is the number to re-check
+   against the first measurement.**
 4. **Did removing `(* keep *)` cost anything else?** All 93 stage cells
    survive, and the RTL argues liberty instances are opaque to yosys — try to
    refute that for the enable leg, the loop-closure wire `fb`, and `osc`.
@@ -617,7 +673,8 @@ Ranked. The first is worth more than the rest combined.
    (bytes, counts, names) instead of the property. Three instances found on
    2026-08-02; assume there are more.
 
-**Nobody should pay against this repo until 2-7 are closed.** The measurement
-circuit itself is now sound, which it was not this morning; what is unsound is
-still the *prediction* it will be compared against (M7, M10) and one untimed
-clock domain (M6).
+**Nobody should pay against this repo until 4-8 are closed** (1, 2 and 3 are
+answered above). The measurement circuit is sound and audited; the timing
+signoff is genuinely multi-corner and the ring domain is timed. What is still
+unsound is the *prediction* the measurement will be compared against — **M7,
+and M7 alone, is the item that touches what this chip is for.**
