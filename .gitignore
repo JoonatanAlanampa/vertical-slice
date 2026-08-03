@@ -28,3 +28,5 @@ harden/runs/
 harden/*.ys
 harden/*.log
 pdk-root/
+__pycache__/
+*.pyc
