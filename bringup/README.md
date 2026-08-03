@@ -19,15 +19,15 @@ Copy it to the board's filesystem and:
 
 2. is the instrument trustworthy
   [PASS] dark ring reports idle     status 0x00 with no ring selected
-  [PASS] valid after a window       count 283, status 0x02
-  [PASS] window agreement           INV: short 442.2 MHz vs long 442.7 MHz (0.11%)
+  [PASS] valid after a window       count 400, status 0x02
+  [PASS] window agreement           INV: short 624.4 MHz vs long 625.0 MHz (0.10%)
 
 3. the measurement
 
   ring        measured    predicted      ratio  stage delay
-  INV         442.7 MHz     442.7 MHz      1.000      36.4 ps
-  NAND2       359.2 MHz     359.2 MHz      1.000      44.9 ps
-  NOR2        252.1 MHz     252.1 MHz      1.000      64.0 ps
+  INV         625.0 MHz     625.0 MHz      1.000      51.6 ps
+  NAND2       459.1 MHz     459.1 MHz      1.000      70.3 ps
+  NOR2        294.5 MHz     294.5 MHz      1.000     109.5 ps
 ```
 
 (That run is against the *virtual* die in `test_bringup_host.py`, which is why

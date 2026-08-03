@@ -68,22 +68,35 @@ ORDER = ("INV", "NAND2", "NOR2")
 BYTE_LO, BYTE_MID, BYTE_HI, BYTE_STATUS = 0, 1, 2, 3
 ST_BUSY, ST_VALID = 0x01, 0x02
 
-# What our own timing model says (flow/ring_prediction.py, all-own netlist,
-# post-P&R SDF at nom_tt_025C_1v80, netlist 0a86598).
+# What our own timing model says (flow/ring_prediction.py --run, all-own
+# netlist, run 30767123276, netlist 0a86598). Nominal is tt/25C/1.80V; the
+# corner band is what a room-temperature part is allowed to land in.
 #
-# Updated 2026-08-02. The previous values (442.7 / 359.2 / 252.1 MHz) were
-# measured on a netlist where a stray BUF_X2 hung off every ring node;
-# removing that load sped the predicted rings up by 1.5-1.7x (READINESS.md
-# H3). Treat these as optimistic by at least ~3%: OpenSTA breaks the ring's
-# combinational loop so one stage per ring contributes zero, and the SDF
-# carries no interconnect delay at all (M7).
-#
-# The old comment here said the library "is characterized at tt/1.8V/25C
-# only". That is not why there is no spread — lib.lock pins three per-corner
-# hardening libs and they really do differ. The spread is missing because
-# only 0.2% of cell delay arcs change between PVT views in the hardened
-# result (M10), which is a flow problem, not a characterization one.
-PREDICTED_HZ = {"INV": 914.1e6, "NAND2": 658.3e6, "NOR2": 411.7e6}
+# Updated 2026-08-03 (M7 closed). The previous values (914.1 / 658.3 /
+# 411.7 MHz) were the raw SDF sums and were 32-46% OPTIMISTIC, for three
+# reasons that are all properties of the SDF rather than of the chip:
+#   1. OpenSTA breaks the ring's combinational loop, so one stage per ring
+#      reports zero. For the INV ring that stage is its lone NAND2 — the
+#      most expensive one — so it was 4.5% short, not 3%.
+#   2. The ring nets carry NO interconnect in the SDF (0.000 everywhere,
+#      while ordinary nets in the same file carry 1-2 ps). The parasitics
+#      exist in final/spef and are worth 0.33-0.75 fF of extra load on a
+#      ~2.1 fF pin cap.
+#   3. Every inverting cell's delay was computed at an input slew of ZERO,
+#      because the library's transition tables are negative for inverting
+#      cells and OpenSTA clamps them (M11). These numbers instead solve the
+#      ring's own fixed point, where input slew = previous stage's output
+#      slew, landing at 14-85 ps.
+# Before 2026-08-02 the table said 442.7 / 359.2 / 252.1 MHz, which was a
+# prediction of a DIFFERENT circuit: a stray BUF_X2 then hung off every ring
+# node (H3, fixed).
+PREDICTED_HZ = {"INV": 625.0e6, "NAND2": 459.1e6, "NOR2": 294.5e6}
+
+# ff(-40C,1.95V) .. ss(100C,1.60V), same model. A part measured at room
+# temperature landing outside this is the interesting result, not an error.
+PREDICTED_BAND_HZ = {"INV": (464.8e6, 732.7e6),
+                     "NAND2": (308.7e6, 583.3e6),
+                     "NOR2": (212.1e6, 356.3e6)}
 
 
 def ring_hz(count, clk_hz, win_bits):

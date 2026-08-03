@@ -1,37 +1,61 @@
 """What our own timing model says the rings will do in silicon.
 
-This is the last prediction that exists before the die does. It reads the
-post-P&R SDF — delays OpenSTA computed from our own Liberty arcs, across
-our own extracted parasitics — and turns each ring into the two numbers
-bring-up will actually compare against: an oscillation frequency, and the
-count the on-chip instrument should report.
+This is the last prediction that exists before the die does, and the number
+the whole chip exists to be compared against. It has two modes:
 
-A ring's period is one full loop for the rising edge plus one for the
-falling edge, so it is the sum of BOTH transition delays over every stage:
+    python flow/ring_prediction.py <sdf-dir-or-file> [...]   # raw SDF table
+    python flow/ring_prediction.py --run <run-dir>           # what silicon does
+
+**They are not the same number, and the difference is the point (M7).** The
+raw table is what the SDF says, which is exactly what a gate-level simulation
+of that SDF will reproduce — the two agree by construction, and that agreement
+was never evidence about silicon. The `--run` mode corrects the SDF for what it
+structurally cannot contain.
+
+A ring's period is one full loop for the rising edge plus one for the falling
+edge, so it is the sum of BOTH transition delays over every stage:
 
     T = sum_stages(t_plh + t_phl)          f = 1 / T
 
-TWO KNOWN BIASES, both measured 2026-08-02 and both making this OPTIMISTIC
-(READINESS.md M7). Neither is fixable here — they are properties of the SDF
-this script reads — but a number quoted without them is dishonest:
+THREE BIASES, all measured 2026-08-03 against run 30767123276, all making the
+raw SDF number OPTIMISTIC. The first two are corrected here. The third is not
+correctable and is carried as an error bar.
 
-  * **One stage per ring reports zero.** A ring is a combinational loop and
-    OpenSTA must break it to get an acyclic timing graph, so exactly one
-    stage's A->Y arc comes through as (0.000:0.000:0.000). The sum therefore
-    covers 30 of 31 stages: the period is ~3% short, the frequency ~3% high.
-    `report()` now prints how many zero arcs it saw, so this is visible
-    rather than assumed.
-  * **No interconnect at all.** Every ring INTERCONNECT entry in the SDF is
-    exactly 0.000 (checked across all nine corners), and STA reports ~98
-    unannotated drivers. So this is a cell-delay-only prediction: real
-    silicon carries the wire too, and will be slower by however much that
-    is worth. Summing IOPATH is therefore not the bug it looks like — the
-    wire physics is simply absent from the input.
+  1. **One stage per ring reports zero.** A ring is a combinational loop and
+     OpenSTA must break it to get an acyclic timing graph, so exactly one
+     stage's A->Y arc comes through as (0.000:0.000:0.000). Correcting it is
+     not a percentage: for the NAND2 and NOR2 rings the missing stage is one
+     of 31 identical ones, but for the INV ring the broken arc is **the single
+     NAND2 gate** — the most expensive stage in that ring — so the raw number
+     is short by 4.5%, not 3%. The fix substitutes the same cell type's
+     measured arc, taken from the ring where it is not broken.
 
-    python flow/ring_prediction.py <sdf-dir-or-file> [...]
+  2. **No interconnect at all.** Every ring INTERCONNECT entry in the SDF is
+     exactly 0.000 while ordinary nets in the same file carry 1-2 ps, and STA
+     reports ~98 unannotated drivers — i.e. the ring nets specifically were
+     never annotated. But the parasitics DO exist: `final/spef/` carries them,
+     and this script reads them. The wire's own RC propagation is negligible
+     (14.3 ohm against 0.83 fF is ~0.012 ps); what matters is that the wire is
+     **extra load on the driver**, 0.33-0.75 fF against a ~2.1 fF pin cap, so
+     15-35% more load than the SDF delay was computed for. Converted to delay
+     through our OWN liberty's load axis, that is worth 3-12 ps per stage.
+     The conversion is robust even though the slew is not: the load slope
+     barely moves between characterized slew rows (see `--run` output).
 
-Point it at harden/runs/*/final/sdf (all-own) or at the reference build's
-SDF to compare the two libraries on the same structure.
+  3. **The input slew is unknowable from this library, and that is a real
+     defect.** 112 of the 176 values in the own liberty's `rise_transition`
+     and `fall_transition` tables are NEGATIVE. A transition time cannot be
+     negative; STA propagates those into the next stage's slew axis anyway,
+     and some stage delays land BELOW anything ever characterized — INV_X1
+     reports 21.5 ps where the fastest characterized row at that load is
+     26.8 ps. So the third bias is not a number to add but a bracket: the
+     `self-consistent` column instead solves the ring's own fixed point —
+     each stage's input slew IS the previous stage's output slew — using the
+     magnitudes of those tables, which are demonstrably right even though
+     their sign is not. That is the number to quote.
+
+Point either mode at `harden/runs/*` (all-own bare die) or at the submitted
+build's run directory to compare the two libraries on the same structure.
 """
 
 import re
@@ -43,6 +67,10 @@ STAGES = 31
 PRE = 8                      # ro_meas PRE_BITS
 WIN = {"short": 12, "long": 20}
 CLK_HZ = 25e6                # the ship clock
+BS = chr(92)                 # backslash; SPEF and SDF escape their names
+
+REPO = Path(__file__).resolve().parents[1]
+LIBDIR = REPO / "lib"
 
 # stage composition per ring: the INV ring is 30 inverters + the NAND2 that
 # gates it; the other two are homogeneous
@@ -52,21 +80,29 @@ COMPOSITION = {
     "NOR2":  {"NOR2_X1": STAGES},
 }
 
+RING_KEY = {"INV": "u_ro_inv", "NAND2": "u_ro_nand2", "NOR2": "u_ro_nor2"}
+
 
 def ring_of(inst):
-    for key, name in (("u_ro_inv", "INV"), ("u_ro_nand2", "NAND2"),
-                      ("u_ro_nor2", "NOR2")):
+    for ring, key in RING_KEY.items():
         if key in inst:
-            return name
+            return ring
     return None
 
 
 def parse(sdf_path):
-    """-> {(ring, celltype): [delays...]} using every IOPATH transition."""
-    text = sdf_path.read_text()
+    """-> {(ring, celltype): ([rise...], [fall...])} using every IOPATH A->Y.
+
+    Deliberately RAW: the loop-breaking zero arc is left in. `test_ro.py`
+    compares gate-level simulation against this, and the simulation is
+    annotated from the same SDF, so it reproduces the zero too. Removing it
+    here would break an agreement that is real (sim vs SDF) in order to chase
+    one that is not (SDF vs silicon).
+    """
+    text = Path(sdf_path).read_text()
     out = {}
     # SDF writes "(CELL\n (CELLTYPE ...", so the split must not expect a space
-    for block in re.split(r"\n\s*\(CELL\b", text)[1:]:
+    for block in re.split(r"\n\s*" + re.escape("(CELL") + r"\b", text)[1:]:
         m = re.search(r'\(CELLTYPE "(\w+)"\)\s*\(INSTANCE ([^\n]*?)\)', block)
         if not m:
             continue
@@ -95,13 +131,168 @@ def parse(sdf_path):
     return out
 
 
+def measured_arcs(per):
+    """-> {(ring, celltype): (live_rise, live_fall, raw_rise, raw_fall, n_zero)}
+
+    Both averages, on purpose, because they answer different questions:
+
+      * `raw_*` includes the loop-breaking zero. It is what the SDF says, so
+        it is what a gate-level simulation annotated from that SDF will
+        reproduce — `test_ro.py` checks exactly this agreement, and it is a
+        real one (sim vs SDF), just not a statement about silicon.
+      * `live_*` excludes it. The zero is a graph artifact, not a fast stage,
+        so this is the number a silicon prediction has to start from.
+
+    `live_*` is None when every arc of that cell in that ring was the break —
+    which happens to the INV ring, whose single NAND2 gate is the broken one.
+    """
+    out = {}
+    for key, (rise, fall) in per.items():
+        pairs = list(zip(rise, fall))
+        live = [(r, f) for r, f in pairs if not (r == 0.0 and f == 0.0)]
+        out[key] = (st.mean([r for r, _ in live]) if live else None,
+                    st.mean([f for _, f in live]) if live else None,
+                    st.mean(rise), st.mean(fall),
+                    len(pairs) - len(live))
+    return out
+
+
+# --------------------------------------------------------------- liberty ---
+
+def parse_liberty(path):
+    """-> {cell: {'pins': {pin: cap_pF}, 'tab': {'cell_rise': (i1, i2, rows)}}}"""
+    txt = Path(path).read_text()
+    starts = [(m.group(1), m.end()) for m in re.finditer(r'\n  cell \((\w+)\) \{', txt)]
+    cells = {}
+    for i, (name, pos) in enumerate(starts):
+        body = txt[pos:starts[i + 1][1] if i + 1 < len(starts) else len(txt)]
+        pins = {p.group(1): float(p.group(2)) for p in re.finditer(
+            r'pin \((\w+)\) \{ direction : input; capacitance : ([\d.]+);', body)}
+        tabs = {}
+        for tm in re.finditer(r'(cell_rise|cell_fall|rise_transition|'
+                              r'fall_transition) \(tbl44\) \{\s*'
+                              r'index_1\("([^"]+)"\);\s*index_2\("([^"]+)"\);\s*'
+                              r'values\((.*?)\);', body, re.S):
+            if tm.group(1) in tabs:      # first timing group is the A->Y arc
+                continue
+            tabs[tm.group(1)] = (
+                [float(x) for x in tm.group(2).split(",")],
+                [float(x) for x in tm.group(3).split(",")],
+                [[float(v) for v in r.split(",")]
+                 for r in re.findall(r'"([^"]+)"', tm.group(4))])
+        cells[name] = {"pins": pins, "tab": tabs}
+    return cells
+
+
+def interp(tab, slew, load):
+    """Bilinear on (input slew, output load). Clamped at the grid edges:
+    this model refuses to extrapolate, which is the whole point of bias 3."""
+    i1, i2, rows = tab
+
+    def axis(idx, v):
+        if v <= idx[0]:
+            return 0, 0.0
+        for k in range(len(idx) - 1):
+            if v <= idx[k + 1]:
+                return k, (v - idx[k]) / (idx[k + 1] - idx[k])
+        return len(idx) - 2, 1.0
+
+    a, fa = axis(i1, slew)
+    b, fb = axis(i2, load)
+    return ((1 - fa) * ((1 - fb) * rows[a][b] + fb * rows[a][b + 1])
+            + fa * ((1 - fb) * rows[a + 1][b] + fb * rows[a + 1][b + 1]))
+
+
+# ------------------------------------------------------------------ spef ---
+
+def spef_wire_caps(path):
+    """-> {net name: total wire capacitance in fF}. `PIN_CAP NONE` in the
+    header means these are wire-only, which is exactly the load the
+    unannotated SDF delays are missing."""
+    txt = Path(path).read_text()
+    nm = {m.group(1): m.group(2)
+          for m in re.finditer(r'^\*(\d+) (\S+)$', txt, re.M)}
+    return {nm.get(m.group(1), m.group(1)).replace(BS, ''):
+            float(m.group(2)) * 1000.0
+            for m in re.finditer(r'^\*D_NET \*(\d+) ([\d.eE+-]+)', txt, re.M)}
+
+
+def ring_loop_caps(caps):
+    """-> {ring: [wire cap fF]} for the 31 nets the oscillation travels.
+
+    Every net under the ring hierarchy except the enable, which is static
+    during a measurement: `<ring>.en` for INV/NAND2, `g_stage[0].b` for NOR2,
+    whose enable enters on the first stage's B pin instead.
+    """
+    out = {}
+    for ring, key in RING_KEY.items():
+        loop = [c for n, c in caps.items()
+                if key + "." in n
+                and not n.endswith(".en") and not n.endswith("g_stage[0].b")]
+        out[ring] = loop
+    return out
+
+
+def wire_delta(lib, cell, wire_fF, slew):
+    """Extra (rise, fall) delay in ns from putting `wire_fF` on top of the
+    receiving pin's capacitance, read off our own characterization."""
+    cpin = lib[cell]["pins"]["A"]                     # pF
+    load = cpin + wire_fF / 1000.0
+    return tuple(interp(lib[cell]["tab"][k], slew, load)
+                 - interp(lib[cell]["tab"][k], slew, cpin)
+                 for k in ("cell_rise", "cell_fall"))
+
+
+def self_consistent(lib, cell, wire_fF, iters=200, tol=1e-9):
+    """(rise, fall, slew_rise, slew_fall) in ns for a stage in a real ring.
+
+    The honest model, and the one this file exists to provide. A ring is a
+    closed loop, so a stage's INPUT slew is the previous stage's OUTPUT slew;
+    every stage here is identical and inverting, so the pair (s_rise, s_fall)
+    has a fixed point. Iterate to it:
+
+        d_rise = cell_rise(s_fall, load)     an inverting output rises
+        d_fall = cell_fall(s_rise, load)     because its input fell
+
+    **`abs()` on the transitions is not a hack, it is the M11 workaround.**
+    Every inverting cell in this library carries NEGATIVE transition tables
+    (INV/NAND2/NOR2: 100% negative; BUF/DFF: 100% positive), which is a
+    characterizer sign convention applied without regard to unateness. The
+    magnitudes are physically sensible — INV_X1 is 11.3 ps into 2 fF where
+    BUF_X1, two stages, is 21.5 ps — so the sign is wrong and the number is
+    right. OpenSTA does not take the magnitude: it clamps to zero, which is
+    why the SDF is faster than anything characterized.
+    """
+    tabs = lib[cell]["tab"]
+    load = lib[cell]["pins"]["A"] + wire_fF / 1000.0
+    s_r = s_f = tabs["cell_rise"][0][0]          # seed at the fastest row
+    d_r = d_f = 0.0
+    for _ in range(iters):
+        d_r = interp(tabs["cell_rise"], s_f, load)
+        d_f = interp(tabs["cell_fall"], s_r, load)
+        n_r = abs(interp(tabs["rise_transition"], s_f, load))
+        n_f = abs(interp(tabs["fall_transition"], s_r, load))
+        if abs(n_r - s_r) < tol and abs(n_f - s_f) < tol:
+            break
+        s_r, s_f = n_r, n_f
+    return d_r, d_f, s_r, s_f
+
+
+# ------------------------------------------------------------------ report --
+
+def count_of(f_hz, window="short"):
+    return f_hz / 2 ** PRE * (2 ** WIN[window] / CLK_HZ)
+
+
 def report(sdf_path):
+    """The raw SDF table — what a gate-level sim of this SDF will reproduce."""
     per = parse(sdf_path)
     if not per:
-        print(f"  {sdf_path.name}: no ring cells found")
+        print(f"  {Path(sdf_path).name}: no ring cells found")
         return
+    arcs = measured_arcs(per)
 
-    print(f"\n{sdf_path.parent.name}")
+    print(f"\n{Path(sdf_path).parent.name}")
     print(f"  {'ring':<7}{'stage cell':<11}{'t_plh':>8}{'t_phl':>8}"
           f"{'period':>10}{'f_ring':>11}{'count/short':>13}")
 
@@ -110,47 +301,137 @@ def report(sdf_path):
         rows = []
         zeros = 0
         for celltype, n in comp.items():
-            arcs = per.get((ring, celltype))
-            if not arcs:
+            got = arcs.get((ring, celltype))
+            if not got:
                 continue
-            rise, fall = arcs
-            zeros += sum(1 for r, f in zip(rise, fall) if r == 0.0 and f == 0.0)
-            period_ns += n * (st.mean(rise) + st.mean(fall))
-            rows.append((celltype, n, st.mean(rise) * 1000, st.mean(fall) * 1000))
+            _, _, rise, fall, nz = got      # RAW means: the SDF as annotated
+            zeros += nz
+            period_ns += n * (rise + fall)
+            rows.append((celltype, n, rise * 1000, fall * 1000))
         if zeros:
-            print(f"  [{ring}] {zeros} stage arc(s) reported 0.000 — the "
-                  f"loop-breaking arc; period is ~{100.0 * zeros / STAGES:.0f}% short")
-        if not rows:
+            print(f"  [{ring}] {zeros} stage arc(s) reported 0.000 — OpenSTA's "
+                  f"loop break, INCLUDED here so this matches a GL sim of the "
+                  f"same SDF; for silicon use --run")
+        if not rows or not period_ns:
             continue
         f_hz = 1e9 / period_ns
-        # what the on-chip counter reports: prescaled edges in the window
-        count = f_hz / 2 ** PRE * (2 ** WIN["short"] / CLK_HZ)
         first = True
         for celltype, n, tr, tf in rows:
+            shown = (f"{tr:>7.1f}p{tf:>7.1f}p" if tr is not None
+                     else f"{'break':>8}{'':>8}")
             if first:
-                print(f"  {ring:<7}{celltype+f' x{n}':<11}{tr:>7.1f}p{tf:>7.1f}p"
-                      f"{period_ns:>9.3f}n{f_hz/1e6:>9.1f}M{count:>13.0f}")
+                print(f"  {ring:<7}{celltype+f' x{n}':<11}{shown}"
+                      f"{period_ns:>9.3f}n{f_hz/1e6:>9.1f}M"
+                      f"{count_of(f_hz):>13.0f}")
                 first = False
             else:
-                print(f"  {'':<7}{celltype+f' x{n}':<11}{tr:>7.1f}p{tf:>7.1f}p")
+                print(f"  {'':<7}{celltype+f' x{n}':<11}{shown}")
+
+
+def silicon(run_dir):
+    """The corrected prediction, per corner, with its error bar."""
+    run = Path(run_dir)
+    sdfs = sorted((run / "final" / "sdf").glob("*/*.sdf"))
+    if not sdfs:
+        sys.exit(f"no final/sdf/*/*.sdf under {run}")
+
+    for sdf in sdfs:
+        corner = sdf.parent.name                     # e.g. nom_tt_025C_1v80
+        rc, pvt = corner.split("_", 1)
+        libp = LIBDIR / f"own_hardening_{pvt}.lib"
+        spefp = next((run / "final" / "spef" / rc).glob("*.spef"), None)
+        if not libp.exists() or spefp is None:
+            print(f"\n{corner}: missing {'lib' if not libp.exists() else 'spef'}"
+                  f" — skipped")
+            continue
+        lib = parse_liberty(libp)
+        loops = ring_loop_caps(spef_wire_caps(spefp))
+        arcs = measured_arcs(parse(sdf))
+        slew = lib["INV_X1"]["tab"]["cell_rise"][0][0]     # characterized floor
+
+        print(f"\n{corner}   (lib {libp.name}, spef {rc})")
+        print(f"  {'ring':<7}{'raw SDF':>10}{'+stage':>10}{'+wire':>10}"
+              f"{'self-consistent':>17}{'count/short':>13}")
+
+        slews = {}
+        for ring, comp in COMPOSITION.items():
+            wire = loops.get(ring, [])
+            if not wire:
+                continue
+            w_mean = st.mean(wire)
+            raw = fixed = wired = floor = 0.0
+            ok = True
+            for celltype, n in comp.items():
+                got = arcs.get((ring, celltype))
+                if not got:
+                    ok = False
+                    break
+                raw += n * (got[2] + got[3])       # SDF as annotated
+                rise, fall = got[0], got[1]
+                if rise is None:
+                    # this cell's only arc in this ring IS the loop break:
+                    # borrow the same cell type from the ring that has it live
+                    donor = next((arcs[k] for k in arcs
+                                  if k[1] == celltype and arcs[k][0] is not None),
+                                 None)
+                    if donor is None:
+                        ok = False
+                        break
+                    rise, fall = donor[0], donor[1]
+                fixed += n * (rise + fall)
+                dr, df = wire_delta(lib, celltype, w_mean, slew)
+                wired += n * (rise + fall + dr + df)
+                sr, sf, slew_r, slew_f = self_consistent(lib, celltype, w_mean)
+                floor += n * (sr + sf)
+                slews[celltype] = (slew_r, slew_f)
+            if not ok:
+                continue
+            f = [1e9 / p for p in (raw, fixed, wired, floor)]
+            print(f"  {ring:<7}{f[0]/1e6:>9.1f}M{f[1]/1e6:>9.1f}M"
+                  f"{f[2]/1e6:>9.1f}M{f[3]/1e6:>16.1f}M"
+                  f"{count_of(f[3]):>13.0f}")
+
+        # the fixed-point slews, and how far outside the characterized grid
+        # STA was operating (it clamps these to zero — M11)
+        i1 = lib["INV_X1"]["tab"]["cell_rise"][0]
+        print("  fixed-point slews (ps, rise/fall): "
+              + "  ".join(f"{c} {r*1000:.1f}/{f*1000:.1f}"
+                          for c, (r, f) in sorted(slews.items()))
+              + f"   [grid starts at {i1[0]*1000:.0f} ps; STA used 0]")
+
+    print("\nColumns, each adding one correction to the one before it:\n"
+          "  raw SDF          what the SDF says, and what a GL sim of that "
+          "SDF reproduces\n"
+          "  +stage           OpenSTA's loop-break stage substituted, not "
+          "averaged in as 0\n"
+          "  +wire            SPEF wire load added through our own liberty's "
+          "load axis\n"
+          "  self-consistent  ...and at the ring's own fixed-point slew "
+          "instead of STA's 0\n"
+          "**Quote the last column.** Counts are per SHORT window (2**12 "
+          "clocks at\n25 MHz); the long window is 256x.")
 
 
 def main():
     args = sys.argv[1:]
     if not args:
         sys.exit(__doc__)
+    if args[0] == "--run":
+        if len(args) < 2:
+            sys.exit("--run needs a run directory")
+        silicon(args[1])
+        return
     files = []
     for a in args:
         p = Path(a)
         files.extend(sorted(p.rglob("*.sdf")) if p.is_dir() else [p])
     if not files:
         sys.exit("no .sdf found")
-
     for f in files:
         report(f)
-
     print("\nNote: a count is per SHORT window (2**12 clocks at 25 MHz); the "
-          "long window is 2**20, i.e. 256x these numbers.")
+          "long window is 2**20, i.e. 256x these numbers.\nThis is the RAW "
+          "table — for what silicon should do, use --run <run-dir>.")
 
 
 if __name__ == "__main__":

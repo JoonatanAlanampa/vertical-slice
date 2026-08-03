@@ -75,35 +75,44 @@ blinks, the level bar waves, and `uo[7]` plays 440 Hz through an RC
 low-pass (1 kOhm + 100 nF) or the TT Audio Pmod. Sweep `ui[6:0]` to walk
 the frequency table; `uo[6]` gives the scope a trigger.
 
-**What the counts should be.** Our own timing model, back-annotated onto
-the placed-and-routed netlist, predicts (short window, 25 MHz clock,
-post-P&R SDF at `nom_tt_025C_1v80`, netlist `0a86598`):
+**What the counts should be.** Our own timing model predicts, per PVT
+corner (short window, 25 MHz clock, run `30767123276`, netlist `0a86598`;
+regenerate with `python flow/ring_prediction.py --run <run-dir>`):
 
-| ring | predicted f | predicted count |
-|---|---|---|
-| INV | 914.1 MHz | 585 |
-| NAND2 | 658.3 MHz | 421 |
-| NOR2 | 411.7 MHz | 263 |
+| ring | ff (-40 C, 1.95 V) | tt (25 C, 1.80 V) | ss (100 C, 1.60 V) |
+|---|---|---|---|
+| INV | 732.7 MHz / 469 | **625.0 MHz / 400** | 464.8 MHz / 297 |
+| NAND2 | 583.3 MHz / 373 | **459.1 MHz / 294** | 308.7 MHz / 198 |
+| NOR2 | 356.3 MHz / 228 | **294.5 MHz / 188** | 212.1 MHz / 136 |
 
 Multiply by 256 for the long window. A silicon reading that disagrees is
 not a bug to be fixed — it is the result this chip exists to produce, and
 the differences *between* flavors say which modelling stage to look at.
 
-**Read those numbers with three known caveats** (`READINESS.md` M6/M7/M10),
-because the point of the chip is an honest comparison:
+**These replace the numbers this page carried until 2026-08-03** (914.1 /
+658.3 / 411.7 MHz), which were the raw SDF sums and were **32-46%
+optimistic**. What changed is the model, not the chip:
 
-- They replace an earlier table (442.7 / 359.2 / 252.1 MHz) that was
-  measured on a netlist in which a stray buffer hung off **every** ring
-  node. Removing that load sped the predicted rings up by 1.5-1.7x. The
-  old numbers were a prediction of the wrong circuit.
-- The prediction is **optimistic by at least ~3%**: OpenSTA breaks the
-  ring's combinational loop, so one stage per ring reports a zero delay
-  and the sum covers 30 of 31 stages. Every ring INTERCONNECT delay in the
-  SDF is also exactly 0.000, so **no wire delay is included at all**.
-- There is **no corner spread** behind them yet. The build nominally has
-  three PVT views, but only 0.2% of cell delay arcs actually differ
-  between them, so treat this as a single-PVT prediction until M10 is
-  resolved. Silicon at -40 C and at 100 C will not read the same number.
+- The SDF **drops one stage per ring** — OpenSTA has to break the
+  combinational loop to get an acyclic timing graph. For NAND2 and NOR2
+  that is one of 31 identical stages; for the INV ring the broken arc is
+  the single NAND2 gate, its most expensive stage, so that ring was short
+  by 4.5% rather than 3%.
+- The SDF carries **no interconnect on the ring nets at all** (every entry
+  exactly 0.000, while ordinary nets in the same file carry 1-2 ps). The
+  parasitics do exist in `final/spef/`, and the wire is worth 0.33-0.75 fF
+  against a ~2.1 fF pin capacitance — 15-35% more load than the delay was
+  computed for. Its own RC propagation is nothing (14.3 ohm on 0.83 fF is
+  ~0.012 ps); it matters purely as load.
+- **STA computed every inverting cell's delay at an input slew of zero**,
+  because this library's transition tables are negative for inverting
+  cells and OpenSTA clamps them (`READINESS.md` M11). The table above
+  instead solves the ring's own fixed point — each stage's input slew is
+  the previous stage's output slew — which lands at 14-85 ps depending on
+  cell and corner, and is where a real ring operates.
+
+The corner spread is now genuine (`READINESS.md` M10): ff and ss differ on
+98.5% of cell delay arcs, so -40 C and 100 C really are different columns.
 
 **Test-structure mode.** Set `ui[7]` and `ui[1:0] = 01`, raise `ui[4]`,
 wait past the window (164 us on the short setting), **then LOWER `ui[4]`

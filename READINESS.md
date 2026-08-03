@@ -22,8 +22,14 @@ submitted netlist, the signoff numbers (LVS unique, DRC/antenna/PDN clean,
 netlists, and — for the first time — a real corner spread.
 
 What that unblocks is the *mechanics* of submitting. It is not by itself a
-recommendation to pay; see "What is left" at the end, which is now a short
-and honest list rather than a wall.
+recommendation to pay; see "What is left" at the end.
+
+⚠️ **Updated 2026-08-03: M7 is closed and a new HIGH finding replaced it.**
+The published ring prediction was **32-46% optimistic**, and chasing that
+found **M11** — this library's transition tables are sign-flipped for every
+inverting cell, so OpenSTA timed the whole design at an input slew of zero and
+`max slew violation count 0` means nothing. Nothing about the fabricated
+netlist changes; the *timing signoff* is what cannot currently be trusted.
 
 | # | Finding | State |
 | --- | --- | --- |
@@ -35,17 +41,23 @@ and honest list rather than a wall.
 | — | `gds` workflow red since 2026-07-25 | ✅ **GREEN** — the linter now runs clean via `CELL_VERILOG_MODELS`, so the upstream `cat` finds its log |
 | M5 | Documented read sequence permits a torn 24-bit count | ✅ **FIXED** — doc bug only; hardware and bring-up script were already correct |
 | M6 | Prescaler in the RO clock domain has no generated-clock constraint | ✅ **CLOSED** — signoff SDC added; the counter closes at 1.094 ns with 266 ps slack |
-| M7 | `ring_prediction.py` may sum cell delays only, not interconnect | 🟡 **CONFIRMED, different cause** — no interconnect in the SDF, one stage dropped; a decision, not a defect |
+| M7 | `ring_prediction.py` may sum cell delays only, not interconnect | ✅ **CLOSED** — the quoted prediction was **32-46% optimistic**; now computed from SPEF + a self-consistent slew, per corner |
+| M11 | Liberty transition tables negative for inverting cells → STA timed the chip at **zero slew** | 🔴 **NEW, HIGH, OPEN** — signoff-wide, fix is in `stdcells`; `max slew violation count 0` is vacuous |
 | L8 | User-facing text quotes one PVT although `lib.lock` pins three | ✅ **FIXED** — text corrected, and the stated *reason* was wrong (see M10) |
 | M10 | Corner-aware STA was not in effect (0.2% of arcs moved between PVT views) | ✅ **FIXED** — now **98.5%**, max delta 155% |
 
-**Still do not pay — but the list is now short, and none of it is
-construction.** What is left is **M7** (the prediction the chip is measured
-against has no wire delay and drops one stage per ring, so it is optimistic —
-a decision to take, not a defect to fix), **M9** (max-cap on the clock tree,
-no ring node at any corner), and **5 of the 8 questions in the review brief**.
-M10, M6 and the red badge are closed. Everything that could make the
-*measurement* wrong is closed and audited in CI.
+**Still do not pay, and there is now a HIGH reason rather than a short list.**
+M7 is closed — and closing it surfaced **M11: this library's transition tables
+are sign-flipped for every inverting cell, so OpenSTA timed the whole chip at
+an input slew of zero.** That does not change what gets fabricated (the
+netlist, LVS/DRC and the connectivity audits are untouched) and the 25 MHz
+design has ~200x margin, so the *die* is very likely fine. What it means is
+that **the timing signoff cannot currently say so**, and `max slew violation
+count 0` is not a result. The fix lives in `stdcells`, not here.
+Also open: **M9** (max-cap on the clock tree, no ring node at any corner) and
+**4 of the 8 questions in the review brief**. M10, M6, M7 and the red badge
+are closed, and everything that could make the *measurement* wrong is audited
+in CI.
 
 ---
 
@@ -421,7 +433,53 @@ only. Fix is to define the ring domain (a `create_clock` on each ring output
 at its predicted period, with the loop arc explicitly broken) and let OpenSTA
 check the prescaler and the synchronizer crossing.
 
-## M7 — CONFIRMED, but the cause is not the one stated.
+## M7 — **CLOSED 2026-08-03. The prediction was 32-46% optimistic.**
+
+Not a decision to accept a ~3% bias after all: measured properly against run
+`30767123276`, the number this page and `docs/info.md` were quoting was wrong
+by a third to a half, and **all three causes are properties of the SDF rather
+than of the chip.** The prediction is now computed instead of read off, by
+`flow/ring_prediction.py --run <run-dir>`.
+
+| ring | was quoted | now predicted (tt) | ff .. ss band |
+| --- | --- | --- | --- |
+| INV | 914.1 MHz / 585 | **625.0 MHz / 400** | 464.8 .. 732.7 MHz |
+| NAND2 | 658.3 MHz / 421 | **459.1 MHz / 294** | 308.7 .. 583.3 MHz |
+| NOR2 | 411.7 MHz / 263 | **294.5 MHz / 188** | 212.1 .. 356.3 MHz |
+
+**1. The dropped stage is not a flat 3%.** OpenSTA breaks the combinational
+loop, so one stage per ring reports `(0.000:0.000:0.000)`. For NAND2 and NOR2
+that is one of 31 identical stages (3.3%); for the INV ring the broken arc is
+**its single NAND2 gate — the most expensive stage in that ring** — so it was
+4.5% short. Corrected by substituting the same cell type's live arc from the
+ring where it is not broken, not by scaling.
+
+**2. The wire was never missing, only unread.** Every ring `INTERCONNECT` entry
+is exactly `0.000` while ordinary nets in the same file carry 1-2 ps, and STA
+reports ~98 unannotated drivers — the ring nets specifically. But
+`final/spef/` has the parasitics all along. Reading them:
+
+- wire cap per loop net: **INV 0.33 fF, NAND2 0.63, NOR2 0.75** (mean), against
+  a ~2.1 fF receiver pin cap — **15-35% more load than the delay was computed
+  for**;
+- the wire's own RC propagation is **nothing**: 14.3 ohm on 0.83 fF is
+  ~0.012 ps, four orders below the stage delay. It matters purely as load;
+- converted through our own liberty's load axis: **3.0 / 7.2 / 11.5 ps per
+  stage**. That conversion is trustworthy even though the slew is not — the
+  load slope barely moves between characterized slew rows (2.97 vs 3.27 ps for
+  INV_X1), which the tool prints so it can be checked.
+
+**3. STA computed every inverting cell at an input slew of ZERO** — see M11
+below, which is the bigger finding and was found by chasing this one. The
+prediction now solves the ring's own fixed point instead: each stage's input
+slew is the previous stage's output slew, iterated to convergence. It lands at
+**14-85 ps** depending on cell and corner, converges from seeds spanning
+1 ps to 1.5 ns, and is where a real ring operates.
+
+**What made this findable at all** is that M10 was fixed first. Per-corner
+predictions did not exist while every corner carried tt timing.
+
+### (superseded) M7 as first written — CONFIRMED, but the cause is not the one stated
 
 The finding guessed the script forgets interconnect. It does only sum
 `IOPATH`, but that is not where the error comes from:
@@ -439,6 +497,62 @@ The finding guessed the script forgets interconnect. It does only sum
 
 Both biases point the same way: **the prediction is optimistic**. The script
 now prints the zero-arc count on every run and its docstring states both.
+
+## M11 — **the library's transition tables are sign-flipped for every
+inverting cell, so STA timed this chip at zero slew.** NEW 2026-08-03, HIGH.
+
+Found while closing M7. It is not a ring problem — it is a **signoff-wide**
+one, and it lives in `stdcells`, not here.
+
+**The evidence, in three steps that each stand alone.**
+
+1. **The liberty.** In `own_hardening_tt_025C_1v80.lib`, every value in
+   `rise_transition` and `fall_transition` is negative for **INV_X1, INV_X2,
+   INV_X4, NAND2_X1 and NOR2_X1**, and positive for **BUF_X1, BUF_X2, BUF_X4
+   and DFF_X1**. That split is exactly inverting vs non-inverting: 112 of 176
+   values negative, and not one mixed cell. A transition time cannot be
+   negative, so this is a characterizer measuring `t(80%) - t(20%)` with fixed
+   thresholds regardless of unateness.
+2. **What OpenSTA does with it — it does not take the magnitude, it clamps.**
+   From the signoff path report at `nom_tt_025C_1v80`, the Slew column:
+   `BUF_X1` reports **0.119581**, and **every** `INV_X1`, `NAND2_X1` and
+   `NOR2_X1` output on the path reports **0.000000** (20 of 21 driver rows).
+   So every inverting cell in this design drives the next one with a slew of
+   zero, and each downstream delay is looked up below the fastest row the
+   library was ever characterized at.
+3. **The magnitudes are right; only the sign is wrong.** `|transition|` rises
+   monotonically with load exactly as the delay does (11.3 → 424.7 ps across
+   the load axis), and **`BUF_X1` — two inverting stages, positive tables —
+   reports 21.5 ps where `INV_X1` reports 11.3 ps at the same load**, almost
+   exactly twice. That is the corroboration: the same quantity, measured on a
+   non-inverting cell, comes out positive and twice as large.
+
+**Consequences, in descending order of how much they should worry someone
+about to pay:**
+
+- **`max slew violation count 0` is vacuous.** A slew clamped to zero cannot
+  exceed a limit. That check has never tested anything on an inverting cell,
+  which is most of this netlist. **This is the fourth instance of this repo's
+  recurring shape — a guard asserting a proxy instead of the property** — and
+  the first one to reach a signoff metric.
+- **Every setup and hold number is optimistic by an unquantified amount.**
+  Zero input slew is the fastest possible lookup. The 25 MHz clock has ~10 ns
+  of slack against ~50 ps stage delays, so the *chip* is almost certainly
+  fine; what is not fine is that the signoff cannot say so.
+- **M6's answer survives in direction but not in margin.** The prescaler was
+  found to close with 266 ps of slack against a 1.094 ns ring. Both sides of
+  that comparison move: the real ring is ~1.6 ns (slower, helps) while the
+  counter's own path is also optimistic (hurts). It very likely still closes —
+  do not re-quote 266 ps until it is re-run on a fixed library.
+- It does **not** touch the netlist, the LVS/DRC signoff, the zero-foundry
+  audit or the connectivity audits. Nothing about what gets fabricated changes.
+
+**The fix is in `stdcells`**: negate the transition tables for negative-unate
+arcs in the characterizer, re-release, re-pin `lib.lock` here, re-harden, and
+re-run `flow/ring_prediction.py --run`. The prediction above is deliberately
+computed with `abs()` on those tables so that it is already the number the
+fixed library should reproduce — **which makes it a testable claim rather than
+a workaround.**
 
 ## L8 — fixed, and the reason given for it was wrong
 
@@ -593,22 +707,24 @@ slow corner is where the M6 constraint had to be corrected before it passed.
 `gds` is green, so nothing below blocks the *mechanics* of submitting. These
 are the reasons to think before paying.
 
-1. **M7 — decide whether the prediction is a fit yardstick.** This is the only
-   item that touches the chip's purpose. The predicted counts have **no
-   interconnect delay at all** (every ring `INTERCONNECT` arc in the SDF is
-   0.000) and **drop one stage per ring** to OpenSTA's loop break, so they are
-   optimistic by at least ~3% plus however much the wires are worth. When
-   silicon disagrees, that gap is the first thing anyone will ask about.
-   "Accept and document the bias" is a perfectly good answer — but it should
-   be a decision, not an oversight.
+1. ✅ **M7 — CLOSED 2026-08-03**, and it was not a decision to take, it was a
+   32-46% error to fix. The prediction is now computed from the SPEF and a
+   self-consistent slew, per corner; `docs/info.md` and the bring-up script
+   carry the new numbers. **What replaced it as item 1 is M11** (below): the
+   library's transition tables are sign-flipped for inverting cells, so the
+   entire timing signoff ran at zero slew. Fix belongs in `stdcells`; then
+   re-pin, re-harden, and re-run `ring_prediction.py --run` — which should
+   reproduce the numbers already published, since they were computed with the
+   sign corrected.
 2. **M9 — max-cap, 8 violations**, all clock-tree or OpenROAD's own repair
    buffers, worst 17% over the library's own 0.100 limit, **no ring node at
    any of the nine corners**. Not on the measurement path. Likely levers: a
    stronger `CTS_ROOT_BUFFER`, or more clock-tree levels.
-3. **The review brief below** — **5 of its 8 questions are still open.**
+3. **The review brief below** — **4 of its 8 questions are still open.**
    Answered: #1 (nothing re-loads the ring nodes in the routed netlist), #2
-   (the M10 mechanism, named and fixed) and #3 (the counter does close against
-   a 914 MHz ring, ~32% headroom, at every corner).
+   (the M10 mechanism, named and fixed), #3 (the counter closes — though see
+   M11 on its margin) and #6 (M7: the prediction was not a fit yardstick, and
+   is now recomputed rather than caveated).
 4. **Re-read the predicted counts in `docs/info.md`.** They were regenerated
    from the fixed netlist at the *old* single-PVT timing. Corners are real
    now, so per-corner ring predictions exist for the first time (ff 1.01 ns /
@@ -662,19 +778,30 @@ Ranked. The first is worth more than the rest combined.
 5. **H4 completeness** — is anything else read live inside a measurement?
    `run`, the byte-select mux, the mode strap `ui[7]`. Can a mid-window
    `ui[7]` flip corrupt a count that still reports `valid`?
-6. **M7** — is a prediction with no wire delay and one dropped stage a fit
-   yardstick for the comparison this chip exists to make?
+6. ✅ **ANSWERED — M7, and the answer was no.** It was not a fit yardstick and
+   it was not a ~3% question: the published number was **32-46% high**. It is
+   now computed from the extracted parasitics and a self-consistent ring slew,
+   per corner, rather than summed off the SDF. **Chasing it is what found
+   M11.** Residual a reviewer could still take: the fixed-point model assumes
+   every stage sees the ring's *mean* wire load, where the real spread is
+   0.10-2.08 fF per net.
 7. **Can the new audits pass vacuously?** `audit_netlist.py`,
    `check_signoff.py` and `check_corner_spread.py` are what future sessions
    will trust. The defect they exist for survived two earlier audits, so an
-   audit that can lie is a first-class bug here.
+   audit that can lie is a first-class bug here. ⚠️ **M11 is a worked example
+   arriving from outside that list**: `max slew violation count 0` passed
+   every run and meant nothing, because the quantity it checks was clamped to
+   zero. Re-read the other signoff metrics with that in mind.
 8. **Sweep for the two failure shapes this repo keeps producing**: a guard on
    an artifact that is not the one submitted, and a guard asserting a proxy
    (bytes, counts, names) instead of the property. Three instances found on
-   2026-08-02; assume there are more.
+   2026-08-02, **a fourth on 2026-08-03 (M11's vacuous max-slew check)**;
+   assume there are more.
 
-**Nobody should pay against this repo until 4-8 are closed** (1, 2 and 3 are
-answered above). The measurement circuit is sound and audited; the timing
-signoff is genuinely multi-corner and the ring domain is timed. What is still
-unsound is the *prediction* the measurement will be compared against — **M7,
-and M7 alone, is the item that touches what this chip is for.**
+**Nobody should pay against this repo until M11 is fixed and 4, 5, 7 and 8 are
+closed.** The measurement circuit is sound and audited, the corners are real,
+the ring domain is timed, and the prediction it will be compared against is
+now honest. What is not sound is the **timing signoff itself**: it ran with
+every inverting cell driving at zero slew, which is most of the netlist. That
+is a `stdcells` fix, a re-pin and a re-harden away — and the die it produces
+is expected to be identical, because none of this touches the netlist.
