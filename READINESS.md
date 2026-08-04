@@ -53,11 +53,13 @@ understatement on the cell driving the slowest ring on this die.
 | L8 | User-facing text quotes one PVT although `lib.lock` pins three | ✅ **FIXED** — text corrected, and the stated *reason* was wrong (see M10) |
 | M10 | Corner-aware STA was not in effect (0.2% of arcs moved between PVT views) | ✅ **FIXED** — now **98.5%**, max delta 155% |
 
-**Still do not pay — but the reason is now a short list again, not a HIGH.**
+**Still do not pay — but the list is now two items, and neither is a HIGH.**
 M11 and M12 are closed, and for the first time the timing signoff is capable
 of failing: `design__max_slew_violation__count = 0` is now a result rather
-than an artefact of clamping. Open: **M9** (max-cap, now 5, no ring node at
-any corner) and **4 of the 8 questions in the review brief**.
+than an artefact of clamping. **All eight review-brief questions are closed**
+as of 2026-08-04. Open:
+1. **M9** — max-cap, now 5 (was 8), no ring node at any corner.
+2. **M6 must be re-measured** — see the embargo below.
 
 ⚠️ **M6's "266 ps of slack" below was measured on the pre-lib-v1.4 library and
 has NOT been re-measured.** Its direction survives; the margin does not. Do
@@ -66,11 +68,13 @@ not quote that number until it is re-run.
 **What M11 cost, so the size of it is on record.** On stdcells' own CORDIC-1
 harden at a byte-identical netlist, correcting the library removed **766 ps of
 phantom setup slack** (13.597 → 12.830 ns worst). Here it had been hiding 58
-max-slew violations. But the *ring prediction* moved by **under 1%** (tt: INV
-625.0 → 628.4 MHz) — because a ring's period sums both edge delays around the
-loop, and M11 exchanged which slew drove which edge, so the total was
-preserved. Do not read that near-invariance as evidence the defect was
-harmless; read it as the one place where the error happened to cancel.
+max-slew violations. But the *ring prediction* moved by **under 1%** (tt INV
+625.0 → 628.4 MHz on the same model) — because a ring's period sums both edge
+delays around the loop, and M11 exchanged which slew drove which edge, so the
+total was preserved. Do not read that near-invariance as evidence the defect
+was harmless; read it as the one place where the error happened to cancel.
+The number now published is **620.6 MHz**, the difference being Q4's tapped
+node rather than anything to do with M11.
 
 ---
 
