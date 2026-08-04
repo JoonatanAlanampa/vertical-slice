@@ -58,6 +58,16 @@ jobs:
           print("zero-foundry: OK on the submitted netlist")
           EOF
 
+      # ...and the same claim against the artifact that is actually fabricated.
+      # Review-brief Q8: the step above audits the NETLIST, which is neither
+      # what the foundry receives nor the property we care about. Fill, tap,
+      # decap, diode and CTS cells enter at the PHYSICAL level, so the GDS is
+      # where "zero foundry content" is either true or not. They agree today
+      # (15 structures: our 14 cells + the top) — assert it, do not assume it.
+      - name: Zero-foundry audit of the FABRICATED GDS
+        if: success() || failure()
+        run: python3 tools/audit_gds.py
+
       # Blocker 2 was "no top-level connectivity signoff on the all-own GDS".
       # It is actually there and it passes — netgen LVS with `-blackbox`
       # comparing the magic-extracted GDS against the post-P&R netlist, which

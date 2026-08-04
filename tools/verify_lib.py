@@ -48,17 +48,31 @@ def main():
         if got != want:
             bad.append(f"{f.relative_to(ROOT)}\n     pinned {want}\n     found  {got}")
 
-    if missing or bad:
+    # Review-brief Q7, demonstrated 2026-08-04: checking only the PINNED files
+    # is a proxy for "lib/ is the pinned library". Planting an unpinned
+    # lib/_vacuity_probe.lib left this script printing "lib/ matches lib.lock:
+    # 9 files" with ten files on disk. That matters because src/config.json and
+    # harden/config.json reference library files BY NAME out of lib/, so an
+    # unpinned file is not inert — it is loadable. Assert the set, not the subset.
+    pinned_names = {Path(rel).name for rel in pins}
+    extra = sorted(f.name for f in LIB.iterdir()
+                   if f.is_file() and f.name not in pinned_names)
+
+    if missing or bad or extra:
         if missing:
             print("MISSING from the committed lib/:", *missing, sep="\n  ")
         if bad:
             print("CHECKSUM MISMATCH vs lib.lock:", *bad, sep="\n  ")
+        if extra:
+            print("UNPINNED files present in lib/ (config.json loads by name, "
+                  "so these are consumable):", *extra, sep="\n  ")
         sys.exit(
             f"\nlib/ does not match lib.lock ({lock.get('repo')} @ "
             f"{lock.get('tag')}).\nRe-run `python tools/fetch_lib.py` and commit "
             f"the result, or fix the pin with --update if the move is intended.")
 
-    print(f"lib/ matches lib.lock: {len(pins)} files, "
+    print(f"lib/ IS lib.lock: {len(pins)} pinned files, all present, all "
+          f"checksums match, and nothing else in lib/ — "
           f"{lock.get('repo')} @ {lock.get('tag')}")
 
 

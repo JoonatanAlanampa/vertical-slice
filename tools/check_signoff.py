@@ -140,7 +140,20 @@ def main():
     for k in MUST_BE_ZERO:
         v = metrics.get(k)
         if v is None:
-            notes.append(f"{k}: ABSENT from metrics (step may not have run)")
+            # Review-brief Q7, demonstrated 2026-08-04: this used to be a NOTE,
+            # and with design__lvs_error__count, magic__drc_error__count,
+            # route__drc_errors and design__max_slew_violation__count deleted
+            # from a real metrics.json this script exited 0 and printed
+            # "signoff: PASS (LVS unique + DRC/antenna/PDN clean)". It asserted
+            # cleanliness it had not checked — the exact shape of M11.
+            #
+            # An absent metric is indistinguishable from a step that stopped
+            # running, and the step list is not immutable: RepairDesignPostGRT
+            # was added to this flow on 2026-08-04, and gl_test in this repo
+            # was silently SKIPPED for 11 days. So absence FAILS.
+            fails.append(
+                f"{k}: ABSENT from metrics — the step that emits it did not "
+                f"run, or was renamed. A missing number is not a zero.")
         elif v != 0:
             fails.append(f"{k} = {v}, expected 0")
         else:
@@ -235,7 +248,10 @@ def main():
         for f in fails:
             print(f"  - {f}")
         return 1
-    print("\nsignoff: PASS (LVS unique + DRC/antenna/PDN clean)")
+    # Name what was actually verified. The old wording claimed "DRC/antenna/PDN
+    # clean" unconditionally, which was a lie whenever a metric was absent.
+    print(f"\nsignoff: PASS ({len(MUST_BE_ZERO)} must-be-zero metrics all "
+          f"present and zero, LVS unique, no ring node over max-cap)")
     return 0
 
 
