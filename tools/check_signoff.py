@@ -60,6 +60,15 @@ MUST_BE_ZERO = [
     "design__max_fanout_violation__count",
     "flow__errors__count",
     "synthesis__check_error__count",
+    # M13, 2026-08-04: this list had NO timing entry at all. The run that
+    # closed M11 and M12 was green while carrying timing__setup_vio__count = 5
+    # and timing__setup__wns = -0.172 ns, every violation on the ro_clk
+    # prescaler — the counter this chip's whole measurement depends on. Third
+    # instance in one day of a guard that does not check its property (M11's
+    # clamped slew, M12's unseen corners, this). A signoff script that reads
+    # LVS, DRC, antenna and PDN but not timing closure is not a signoff script.
+    "timing__setup_vio__count",
+    "timing__hold_vio__count",
 ]
 
 # Open item, deliberately not zero (READINESS.md M9). History: 4 at 2312cf2,

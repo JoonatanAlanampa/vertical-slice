@@ -73,30 +73,56 @@ if {[info exists ::env(FALLBACK_SDC)] && [file exists $::env(FALLBACK_SDC)]} {
 # whichever ring is selected:
 #
 #     corner              INV     NAND2    NOR2   -> ro_clk period
-#     *_ff_n40C_1v95     1.01     1.27     2.04      1.006  (994 MHz)
-#     *_tt_025C_1v80     1.13     1.54     2.39      1.116  (896 MHz)
-#     *_ss_100C_1v60     1.49     2.28     3.29      1.477  (677 MHz)
+#     *_ff_n40C_1v95     1.36     1.71     2.76      1.358  (736 MHz)
+#     *_tt_025C_1v80     1.60     2.20     3.43      1.601  (625 MHz)
+#     *_ss_100C_1v60     2.17     3.28     4.82      2.166  (462 MHz)
 #
 # Each entry is the min across that PVT's nom/min/max interconnect variants,
 # so the constraint is the tightest of the group.
 #
-# These are PREDICTIONS, and M7 makes them optimistic (no interconnect delay
-# in the SDF, one stage per ring dropped by the loop break). Optimistic here
-# means the predicted period is SHORTER than reality, so the counter is being
-# asked to do more than silicon will: the error is on the safe side. Revisit
-# against the first real measurement anyway.
+# ⚠️ UPDATED 2026-08-04 (M14). The previous table — 1.006 / 1.116 / 1.477 —
+# was built from a prediction that has since been corrected TWICE: M7 (the
+# published numbers were 32-46% optimistic, not the ~3% bias they were written
+# up as) and review-brief Q4 (the loop-closure node drives two pins, worth
+# another 1.0-1.2%). It therefore over-constrained by 35-47%, and on lib-v1.4
+# the counter MISSED SETUP AT ss BY 172 ps against a ring that physically runs
+# 47% slower than the constraint claimed. The comment here predicted exactly
+# this — "these are PREDICTIONS … Revisit" — and nobody revisited.
+#
+# LOOSENING A CONSTRAINT IS NORMALLY THE SIN tools/check_signoff.py exists to
+# prevent, so the justification has to be that the OLD number was INVALID
+# rather than that the new one is convenient. It was: it came from a model we
+# have since measured as 32-46% wrong. Same test M9's baseline had to pass.
+#
+# The constraint is now the corrected prediction itself, which makes the
+# margin an honest ratio instead of a slack figure. What the netlist actually
+# tolerates, measured on run 30934157150 (worst ro_clk->ro_clk arrival plus a
+# 70 ps setup/uncertainty allowance):
+#
+#     corner    ring period   counter needs   HEADROOM
+#     ff          1.358 ns       0.890 ns      1.53x
+#     tt          1.601 ns       1.150 ns      1.39x
+#     ss          2.166 ns       1.700 ns      1.27x   <- binding
+#
+# So the instrument survives a ring up to 27% FASTER than predicted at the
+# binding corner. That ratio, not a picosecond count, is the number to check
+# against the first silicon measurement — and it is the number M6 should be
+# quoted as from now on.
 array set ro_period_by_pvt {
-    ff_n40C_1v95 1.006
-    tt_025C_1v80 1.116
-    ss_100C_1v60 1.477
+    ff_n40C_1v95 1.358
+    tt_025C_1v80 1.601
+    ss_100C_1v60 2.166
 }
 set ro_corner "<unset>"
 if {[info exists ::env(_CURRENT_CORNER_NAME)]} {
     set ro_corner $::env(_CURRENT_CORNER_NAME)
 }
 # Default to the globally fastest ring: if the corner cannot be identified we
-# over-constrain rather than under-constrain, and say so loudly.
-set ro_period 1.006
+# over-constrain rather than under-constrain, and say so loudly. This tracks
+# the ff entry above (M14) — it used to be 1.006, an orphan of the invalidated
+# pre-M7 model that would have re-created the same phantom ss violations the
+# moment corner detection broke.
+set ro_period 1.358
 set ro_matched 0
 foreach {pvt period} [array get ro_period_by_pvt] {
     if {[string match "*$pvt*" $ro_corner]} {
