@@ -81,9 +81,9 @@ regenerate with `python flow/ring_prediction.py --run <run-dir>`):
 
 | ring | ff (-40 C, 1.95 V) | tt (25 C, 1.80 V) | ss (100 C, 1.60 V) |
 |---|---|---|---|
-| INV | 741.5 MHz / 475 | **628.4 MHz / 402** | 463.4 MHz / 297 |
-| NAND2 | 591.2 MHz / 378 | **460.1 MHz / 294** | 308.1 MHz / 197 |
-| NOR2 | 365.9 MHz / 234 | **294.8 MHz / 189** | 209.3 MHz / 134 |
+| INV | 731.8 MHz / 468 | **620.6 MHz / 397** | 457.8 MHz / 293 |
+| NAND2 | 584.0 MHz / 374 | **455.0 MHz / 291** | 304.8 MHz / 195 |
+| NOR2 | 361.9 MHz / 232 | **291.9 MHz / 187** | 207.4 MHz / 133 |
 
 Multiply by 256 for the long window. A silicon reading that disagrees is
 not a bug to be fixed — it is the result this chip exists to produce, and
@@ -95,12 +95,20 @@ RC brackets it (counts per short window):
 
 | ring | ff min..max | tt min..max | ss min..max |
 |---|---|---|---|
-| INV | 478 .. 471 | 405 .. 399 | 299 .. 294 |
-| NAND2 | 383 .. 374 | 299 .. 290 | 200 .. 194 |
-| NOR2 | 237 .. 231 | 191 .. 186 | 136 .. 132 |
+| INV | 471 .. 465 | 400 .. 394 | 295 .. 290 |
+| NAND2 | 378 .. 369 | 295 .. 287 | 198 .. 192 |
+| NOR2 | 234 .. 228 | 189 .. 184 | 135 .. 130 |
 
 So a reading anywhere inside its PVT column's band is consistent with the
 model; only a miss outside all three bands is a real disagreement.
+
+**One stage per ring is charged double.** The loop-closure node — `fb`, which
+is the same net as `n[30]` and `osc` — drives stage 0 *and* the tap into
+`ro_meas`, so it carries two pin loads where every other node carries one.
+Measured on the routed netlist (29 nets at fanout 1, `fb` at 2, and **no
+buffer on it**, which is H3 staying fixed). Charging it costs **1.0-1.2%**,
+and the table above already includes it; predictions published before
+2026-08-04 do not.
 
 **These replace the numbers this page carried until 2026-08-03** (914.1 /
 658.3 / 411.7 MHz), which were the raw SDF sums and were **32-46%
@@ -136,6 +144,14 @@ CORDIC-1 harden, and it hid **58 max-slew violations** here (`M12`).
 
 The corner spread is now genuine (`READINESS.md` M10): ff and ss differ on
 98.5% of cell delay arcs, so -40 C and 100 C really are different columns.
+
+⚠️ **Set the selectors BEFORE raising `ui[4]`, as two separate motions.**
+`ui[1:0]` (ring) and `ui[5]` (window) are latched on the clock edge that arms
+the measurement, and `ui[]` is not synchronized. Move a selector in the same
+clock as `run` rises and the design can latch a ring you did not choose — the
+count will be perfectly good and `valid` will be true, but it will be labelled
+with the wrong ring. Nothing downstream can detect that, so it is procedure,
+not paranoia.
 
 **Test-structure mode.** Set `ui[7]` and `ui[1:0] = 01`, raise `ui[4]`,
 wait past the window (164 us on the short setting), **then LOWER `ui[4]`

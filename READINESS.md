@@ -830,12 +830,45 @@ Ranked. The first is worth more than the rest combined.
    measured against a prediction known to be optimistic (M7), so silicon
    ringing faster eats it directly — **1.21 GHz is the number to re-check
    against the first measurement.**
-4. **Did removing `(* keep *)` cost anything else?** All 93 stage cells
-   survive, and the RTL argues liberty instances are opaque to yosys — try to
-   refute that for the enable leg, the loop-closure wire `fb`, and `osc`.
-5. **H4 completeness** — is anything else read live inside a measurement?
-   `run`, the byte-select mux, the mode strap `ui[7]`. Can a mid-window
-   `ui[7]` flip corrupt a count that still reports `valid`?
+4. ✅ **ANSWERED 2026-08-04 — the refutation fails, but it found a 1.2% bias.**
+   Read off the ROUTED netlist of run 30934157150, not argued:
+   - **Enable leg: not folded.** The dangerous case was yosys constant-folding
+     a NAND2 with B=1 into an inverter, which would silently turn the NAND2
+     ring into a second INV ring. It did not: all 60 chain stages of the NAND2
+     and NOR2 rings take B from **their own dedicated `TIE_X1`** (`_2283_`
+     .. `_2342_`, one per stage), and stage 0 of each takes the real enable.
+     The INV ring has exactly one B pin, on its stage-0 NAND2.
+   - **`fb` and `osc` collapsed into one net with NO buffer on it**, which is
+     precisely what dropping `keep` was for — `fb` has no driver instance of
+     its own because it is the alias of `n[30]`.
+   - ⚠️ **But that alias is a node with TWO loads**, and the prediction assumed
+     one. Fanout per ring: 29 nets at 1 load, `fb` at 2 — stage 0 plus the tap
+     into `ro_meas`. Charging the second pin costs **1.0-1.2%**, so every
+     prediction published before 2026-08-04 was that much fast.
+     `ring_prediction.py` now charges it (`extra_tap_delay`) and `docs/info.md`
+     is regenerated. **This is the ring-node load H3 was about, arriving by a
+     different route** — not a buffer this time, a legitimate observer.
+5. ✅ **ANSWERED 2026-08-04 — no, a mid-window `ui[7]` flip cannot corrupt a
+   count.** Traced every live input through `ro_meas` and `project.sv`:
+   - `sel` and `win_long` are latched at arm (that is H4's fix).
+   - **`run` is read ONLY in `S_IDLE`.** `run = test_mode & ui_in[4]`, so
+     `ui[7]` does feed it — but dropping either mid-window neither aborts the
+     FSM nor darkens the rings (`ring_en` keys off `armed && sel_q`). The
+     window completes and latches normally.
+   - The **byte-select mux `ui[3:2]`** is combinational on the OUTPUT only and
+     never reaches the FSM. Changing it mid-window changes what you are
+     looking at, not what is being counted. Reading ACROSS a `count` update is
+     the M5 torn read, already closed by the documented procedure.
+   - `ui[7]` on the `uo_out` mux likewise only changes what is displayed.
+   - ⚠️ **RESIDUAL, and it is the honest answer to "anything else": `ui_in` is
+     never synchronized.** `sel`, `win_long` and `run` go straight from the pad
+     into `always_ff @(posedge clk)`. This cannot corrupt a count, but if a
+     selector is moved in the SAME clock as `run` rises, `sel_q` can latch a
+     ring you did not intend — and then `valid` is true, the count is good, and
+     only its *label* is wrong. That is the silent class again. It needs no
+     gate: the documented procedure already sets the selectors first, and
+     `docs/info.md` now says so as an instruction rather than an ordering
+     accident.
 6. ✅ **ANSWERED — M7, and the answer was no.** It was not a fit yardstick and
    it was not a ~3% question: the published number was **32-46% high**. It is
    now computed from the extracted parasitics and a self-consistent ring slew,
@@ -856,8 +889,18 @@ Ranked. The first is worth more than the rest combined.
    2026-08-02, **a fourth on 2026-08-03 (M11's vacuous max-slew check)**;
    assume there are more.
 
-**Nobody should pay against this repo until M11 is fixed and 4, 5, 7 and 8 are
-closed.** The measurement circuit is sound and audited, the corners are real,
+✅ **UPDATED 2026-08-04: M11 is fixed, and questions 4, 5, 7 and 8 are all
+closed** — 7 and 8 by making three audits fail when they should (two could
+pass vacuously; one guarded the netlist instead of the GDS), 4 and 5 by
+reading the routed netlist and the RTL rather than arguing from the source.
+Two real defects came out of it: the ring prediction was 1.0-1.2% fast
+because the loop-closure node drives two pins, and `ui[]` is unsynchronized
+so a selector moved in the arming clock can mislabel which ring was measured.
+Both are closed — the first in the model, the second in the procedure.
+**What remains before payment is M9 (max-cap, 5) and re-measuring M6.**
+
+(superseded) ~~Nobody should pay against this repo until M11 is fixed and 4, 5, 7 and 8 are
+closed.~~ The measurement circuit is sound and audited, the corners are real,
 the ring domain is timed, and the prediction it will be compared against is
 now honest. What is not sound is the **timing signoff itself**: it ran with
 every inverting cell driving at zero slew, which is most of the netlist. That

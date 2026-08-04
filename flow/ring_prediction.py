@@ -244,6 +244,23 @@ def wire_delta(lib, cell, wire_fF, slew):
                  for k in ("cell_rise", "cell_fall"))
 
 
+def extra_tap_delay(lib, cell, wire_fF, slew_r, slew_f):
+    """How much SLOWER the one double-loaded stage is, in ns (rise+fall).
+
+    The loop-closure node of every ring drives two pins: stage 0 of the ring
+    and the tap into `ro_meas`. Measured on the routed netlist of run
+    30934157150 — per ring, 29 nets carry one load and `fb` carries two.
+    Charged once per ring, at the ring's own fixed-point slew.
+    """
+    tabs = lib[cell]["tab"]
+    pin = lib[cell]["pins"]["A"]
+    one = pin + wire_fF / 1000.0
+    two = 2 * pin + wire_fF / 1000.0
+    d1 = interp(tabs["cell_rise"], slew_f, one) + interp(tabs["cell_fall"], slew_r, one)
+    d2 = interp(tabs["cell_rise"], slew_f, two) + interp(tabs["cell_fall"], slew_r, two)
+    return d2 - d1
+
+
 def self_consistent(lib, cell, wire_fF, iters=200, tol=1e-9):
     """(rise, fall, slew_rise, slew_fall) in ns for a stage in a real ring.
 
@@ -371,6 +388,7 @@ def silicon(run_dir):
             w_mean = st.mean(wire)
             raw = fixed = wired = floor = 0.0
             ok = True
+            tapped = {}
             for celltype, n in comp.items():
                 got = arcs.get((ring, celltype))
                 if not got:
@@ -394,8 +412,27 @@ def silicon(run_dir):
                 sr, sf, slew_r, slew_f = self_consistent(lib, celltype, w_mean)
                 floor += n * (sr + sf)
                 slews[celltype] = (slew_r, slew_f)
+                # Review-brief Q4, measured 2026-08-04 on the ROUTED netlist:
+                # exactly ONE node per ring drives TWO pins, not one. It is the
+                # loop-closure net `fb` — the alias of n[STAGES-1] and `osc` —
+                # which feeds stage 0 AND the tap into ro_meas. (Fanout
+                # histogram per ring: 29 nets at 1 load, `fb` at 2. There is no
+                # buffer on it, which is H3 staying fixed.) Every other stage
+                # in the model carries a single pin load, so the ring was
+                # predicted ~1.0-1.2% fast. Charge that one stage the second
+                # pin instead of documenting the error.
+                tapped[celltype] = extra_tap_delay(lib, celltype, w_mean,
+                                                   slew_r, slew_f)
             if not ok:
                 continue
+            # The tapped stage is the driver of n[STAGES-1], i.e. the ring's
+            # majority cell — stage 0 (the enable gate) is at the OTHER end of
+            # the loop. Verified against the routed netlist: the INV ring's
+            # `fb` is driven by an INV_X1 and loads NAND2_X1.A (stage 0) +
+            # INV_X1.A (the tap); NOR2's is driven by NOR2_X1 and loads
+            # NOR2_X1.A + NAND2_X1.A. Charged ONCE per ring.
+            if tapped:
+                floor += tapped[max(comp, key=comp.get)]
             f = [1e9 / p for p in (raw, fixed, wired, floor)]
             print(f"  {ring:<7}{f[0]/1e6:>9.1f}M{f[1]/1e6:>9.1f}M"
                   f"{f[2]/1e6:>9.1f}M{f[3]/1e6:>16.1f}M"
