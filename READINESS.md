@@ -24,12 +24,18 @@ netlists, and — for the first time — a real corner spread.
 What that unblocks is the *mechanics* of submitting. It is not by itself a
 recommendation to pay; see "What is left" at the end.
 
-⚠️ **Updated 2026-08-03: M7 is closed and a new HIGH finding replaced it.**
-The published ring prediction was **32-46% optimistic**, and chasing that
-found **M11** — this library's transition tables are sign-flipped for every
-inverting cell, so OpenSTA timed the whole design at an input slew of zero and
-`max slew violation count 0` means nothing. Nothing about the fabricated
-netlist changes; the *timing signoff* is what cannot currently be trusted.
+✅ **Updated 2026-08-04: M11 is CLOSED, and closing it immediately exposed —
+then closed — M12.** The library is re-pinned to `stdcells` **lib-v1.4**, which
+measures output transitions by direction instead of by crossing ordinal. The
+first honest signoff then failed: **58 max-slew violations at ss** that the
+clamped-to-zero slews had been hiding. Those are fixed too, and `gds` is green
+at `3df8dc5` (run **30934157150**) with `precheck`, `gl_test` and `viewer`.
+
+⚠️ **M11 was NOT the sign error it was written up as.** The tables were
+negative *and exchanged*: every magnitude was present, attached to the opposite
+table. `abs()` alone — the fix this file previously implied — would have
+shipped **NOR2_X1's rise transition as 15.68 ps when it is 50.87**, a 3.2x
+understatement on the cell driving the slowest ring on this die.
 
 | # | Finding | State |
 | --- | --- | --- |
@@ -37,27 +43,34 @@ netlist changes; the *timing signoff* is what cannot currently be trusted.
 | H3 | Buffers loading the ring oscillators | ✅ **FIXED** — 0 on ring nodes in the SYNTHESIZED *and* ROUTED netlists; both audited in CI |
 | H4 | Ring select and window length are live during a measurement | ✅ **FIXED** — latched at arm, test proves it |
 | B2 | "No top-level LVS/DRC signoff on the all-own GDS" | ✅ **NOT A GAP** — it runs, is enforced, and matches uniquely; now asserted in CI |
-| M9 | max-cap violations (8, clock tree + repair buffers) | 🟡 **OPEN, characterised** — no ring node at any corner; worst 17% over |
+| M9 | max-cap violations (clock tree + repair buffers) | 🟡 **OPEN, characterised** — now **5**, down from 8; no ring node at any corner |
 | — | `gds` workflow red since 2026-07-25 | ✅ **GREEN** — the linter now runs clean via `CELL_VERILOG_MODELS`, so the upstream `cat` finds its log |
 | M5 | Documented read sequence permits a torn 24-bit count | ✅ **FIXED** — doc bug only; hardware and bring-up script were already correct |
 | M6 | Prescaler in the RO clock domain has no generated-clock constraint | ✅ **CLOSED** — signoff SDC added; the counter closes at 1.094 ns with 266 ps slack |
 | M7 | `ring_prediction.py` may sum cell delays only, not interconnect | ✅ **CLOSED** — the quoted prediction was **32-46% optimistic**; now computed from SPEF + a self-consistent slew, per corner |
-| M11 | Liberty transition tables negative for inverting cells → STA timed the chip at **zero slew** | 🔴 **NEW, HIGH, OPEN** — signoff-wide, fix is in `stdcells`; `max slew violation count 0` is vacuous |
+| M11 | Liberty transition tables negative for inverting cells → STA timed the chip at **zero slew** | ✅ **CLOSED 2026-08-04** — fixed at source in `stdcells` **lib-v1.4** and re-pinned here. Was **negated AND exchanged**, not a sign error |
+| M12 | 58 max-slew violations at ss, hidden by M11's clamped-to-zero slews | ✅ **CLOSED 2026-08-04** — repair could not see them (one estimated-parasitic view, no RC corners yet); fixed with repair margin, not a looser limit |
 | L8 | User-facing text quotes one PVT although `lib.lock` pins three | ✅ **FIXED** — text corrected, and the stated *reason* was wrong (see M10) |
 | M10 | Corner-aware STA was not in effect (0.2% of arcs moved between PVT views) | ✅ **FIXED** — now **98.5%**, max delta 155% |
 
-**Still do not pay, and there is now a HIGH reason rather than a short list.**
-M7 is closed — and closing it surfaced **M11: this library's transition tables
-are sign-flipped for every inverting cell, so OpenSTA timed the whole chip at
-an input slew of zero.** That does not change what gets fabricated (the
-netlist, LVS/DRC and the connectivity audits are untouched) and the 25 MHz
-design has ~200x margin, so the *die* is very likely fine. What it means is
-that **the timing signoff cannot currently say so**, and `max slew violation
-count 0` is not a result. The fix lives in `stdcells`, not here.
-Also open: **M9** (max-cap on the clock tree, no ring node at any corner) and
-**4 of the 8 questions in the review brief**. M10, M6, M7 and the red badge
-are closed, and everything that could make the *measurement* wrong is audited
-in CI.
+**Still do not pay — but the reason is now a short list again, not a HIGH.**
+M11 and M12 are closed, and for the first time the timing signoff is capable
+of failing: `design__max_slew_violation__count = 0` is now a result rather
+than an artefact of clamping. Open: **M9** (max-cap, now 5, no ring node at
+any corner) and **4 of the 8 questions in the review brief**.
+
+⚠️ **M6's "266 ps of slack" below was measured on the pre-lib-v1.4 library and
+has NOT been re-measured.** Its direction survives; the margin does not. Do
+not quote that number until it is re-run.
+
+**What M11 cost, so the size of it is on record.** On stdcells' own CORDIC-1
+harden at a byte-identical netlist, correcting the library removed **766 ps of
+phantom setup slack** (13.597 → 12.830 ns worst). Here it had been hiding 58
+max-slew violations. But the *ring prediction* moved by **under 1%** (tt: INV
+625.0 → 628.4 MHz) — because a ring's period sums both edge delays around the
+loop, and M11 exchanged which slew drove which edge, so the total was
+preserved. Do not read that near-invariance as evidence the defect was
+harmless; read it as the one place where the error happened to cancel.
 
 ---
 
@@ -310,6 +323,51 @@ Two things this settles:
 Severity: worst overage 14.9%, most under 3%, all on the clock/repair path.
 Real, worth closing before silicon, not measurement-corrupting. Likely levers:
 a stronger `CTS_ROOT_BUFFER`, or more clock-tree levels.
+
+## M12 — 58 max-slew violations. **FOUND AND CLOSED 2026-08-04.**
+
+M11's fix made this appear within one run, which is the whole argument for
+having fixed M11: the check that had been reporting `0` reported **58**.
+
+**Where they were.** Per view, post-route (`56-openroad-stapostpnr`):
+
+| | nom | max | min |
+| --- | --- | --- | --- |
+| **tt** | 0 | 10 | 0 |
+| **ss** | 39 | **58** | 20 |
+| **ff** | 0 | 0 | 0 |
+
+Nine distinct drivers; the worst, `_2566_/Y`, measured 0.983 ns at `max_ss`
+against `set_max_transition 0.750` — and `<=0.750` at `nom_tt`, where it is
+not a violator at all. PVT dominates (+29% tt→ss), RC adds ~5% on top.
+
+**Why repair had not fixed them, which is the transferable part.** Repair did
+run and did succeed on its own terms: `32-openroad-repairdesignpostgpl` found
+24 slew violations and fixed them with 50 buffers. But `repair_design` works
+from **one estimated-parasitic view**, and the `min`/`nom`/`max` RC corners do
+not exist until RCX at step 54. Signoff checks 3 RC × 3 PVT = 9 views. The
+violations lived in views the optimizer structurally cannot see.
+
+Enabling `RUN_POST_GRT_DESIGN_REPAIR` (absent from the flow because librelane
+defaults it to `False` — verified by reading `flows/classic.py:139,:271`, not
+guessed) proved this rather than fixing it: the step ran, reported *"Found 1
+slew violations"*, 0 resized, 0 buffers, area +0.0%, and the netlist came out
+byte-identical. It was not being lazy; at the view it can see there is nothing
+wrong.
+
+**The fix is margin, not a looser limit.** `DESIGN_REPAIR_MAX_SLEW_PCT` and
+`GRT_DESIGN_REPAIR_MAX_SLEW_PCT` raised to 40, so repair targets 0.45 ns at
+the view it can see — comfortably under the 0.545 ns the corner spread demands
+(0.75 / 1.29 / 1.05). **`MAX_TRANSITION_CONSTRAINT` is untouched at 0.75**:
+the signoff limit did not move, only what the optimizer aims at. Cost: 12
+extra `INV_X1` in the routed netlist, and max-cap improved 8 → 5 as a side
+effect.
+
+**The ring risk was named in advance and checked.** This step inserts buffers,
+and H3 was exactly that failure — an `insbuf` pass leaving a dangling buffer
+on all 93 ring nodes. `audit_netlist.py` reports `ring census: OK (93 stage
+cells)` and `ring node fanout: OK (each stage -> 1 stage; 3 taps)` on **both**
+the committed and the routed netlist of the green run.
 
 ## The zero-foundry audit does not run when the badge is red — **fixed**
 

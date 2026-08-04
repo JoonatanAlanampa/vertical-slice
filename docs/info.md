@@ -76,18 +76,31 @@ low-pass (1 kOhm + 100 nF) or the TT Audio Pmod. Sweep `ui[6:0]` to walk
 the frequency table; `uo[6]` gives the scope a trigger.
 
 **What the counts should be.** Our own timing model predicts, per PVT
-corner (short window, 25 MHz clock, run `30767123276`, netlist `0a86598`;
+corner (short window, 25 MHz clock, run `30934157150`, `lib-v1.4`;
 regenerate with `python flow/ring_prediction.py --run <run-dir>`):
 
 | ring | ff (-40 C, 1.95 V) | tt (25 C, 1.80 V) | ss (100 C, 1.60 V) |
 |---|---|---|---|
-| INV | 732.7 MHz / 469 | **625.0 MHz / 400** | 464.8 MHz / 297 |
-| NAND2 | 583.3 MHz / 373 | **459.1 MHz / 294** | 308.7 MHz / 198 |
-| NOR2 | 356.3 MHz / 228 | **294.5 MHz / 188** | 212.1 MHz / 136 |
+| INV | 741.5 MHz / 475 | **628.4 MHz / 402** | 463.4 MHz / 297 |
+| NAND2 | 591.2 MHz / 378 | **460.1 MHz / 294** | 308.1 MHz / 197 |
+| NOR2 | 365.9 MHz / 234 | **294.8 MHz / 189** | 209.3 MHz / 134 |
 
 Multiply by 256 for the long window. A silicon reading that disagrees is
 not a bug to be fixed — it is the result this chip exists to produce, and
 the differences *between* flavors say which modelling stage to look at.
+
+**The RC corner is worth about 1.5%, so it is a band, not a column.** The
+table above is the `nom` parasitic extraction. Per PVT corner, `min`..`max`
+RC brackets it (counts per short window):
+
+| ring | ff min..max | tt min..max | ss min..max |
+|---|---|---|---|
+| INV | 478 .. 471 | 405 .. 399 | 299 .. 294 |
+| NAND2 | 383 .. 374 | 299 .. 290 | 200 .. 194 |
+| NOR2 | 237 .. 231 | 191 .. 186 | 136 .. 132 |
+
+So a reading anywhere inside its PVT column's band is consistent with the
+model; only a miss outside all three bands is a real disagreement.
 
 **These replace the numbers this page carried until 2026-08-03** (914.1 /
 658.3 / 411.7 MHz), which were the raw SDF sums and were **32-46%
@@ -105,11 +118,21 @@ optimistic**. What changed is the model, not the chip:
   computed for. Its own RC propagation is nothing (14.3 ohm on 0.83 fF is
   ~0.012 ps); it matters purely as load.
 - **STA computed every inverting cell's delay at an input slew of zero**,
-  because this library's transition tables are negative for inverting
-  cells and OpenSTA clamps them (`READINESS.md` M11). The table above
-  instead solves the ring's own fixed point — each stage's input slew is
-  the previous stage's output slew — which lands at 14-85 ps depending on
-  cell and corner, and is where a real ring operates.
+  because this library's transition tables were negative for inverting
+  cells and OpenSTA clamps them (`READINESS.md` M11). ✅ **Fixed at the
+  source in `stdcells` lib-v1.4**, pinned here since 2026-08-04. The table
+  above solves the ring's own fixed point — each stage's input slew is the
+  previous stage's output slew — which lands at 12-87 ps depending on cell
+  and corner, below the NLDM's first characterized row (20 ps), which is
+  why the fixed point is used rather than a lookup.
+
+**The numbers barely moved when M11 was fixed, and that is not evidence
+the defect was harmless.** tt went 625.0 → 628.4 / 459.1 → 460.1 / 294.5 →
+294.8 MHz, all under 1%. A ring's period is the SUM of both edge delays
+around the loop, and M11 exchanged which slew drove which edge, so the
+total was preserved almost exactly. Where the two edges are *not* summed
+the same defect was worth **766 ps** of setup slack on stdcells' own
+CORDIC-1 harden, and it hid **58 max-slew violations** here (`M12`).
 
 The corner spread is now genuine (`READINESS.md` M10): ff and ss differ on
 98.5% of cell delay arcs, so -40 C and 100 C really are different columns.

@@ -42,17 +42,18 @@ correctable and is carried as an error bar.
      The conversion is robust even though the slew is not: the load slope
      barely moves between characterized slew rows (see `--run` output).
 
-  3. **The input slew is unknowable from this library, and that is a real
-     defect.** 112 of the 176 values in the own liberty's `rise_transition`
-     and `fall_transition` tables are NEGATIVE. A transition time cannot be
-     negative; STA propagates those into the next stage's slew axis anyway,
-     and some stage delays land BELOW anything ever characterized — INV_X1
-     reports 21.5 ps where the fastest characterized row at that load is
-     26.8 ps. So the third bias is not a number to add but a bracket: the
-     `self-consistent` column instead solves the ring's own fixed point —
-     each stage's input slew IS the previous stage's output slew — using the
-     magnitudes of those tables, which are demonstrably right even though
-     their sign is not. That is the number to quote.
+  3. **The ring operates below the characterized slew grid.** ~~The input
+     slew is unknowable from this library~~ — that was M11, and it is FIXED
+     at the source: `stdcells` lib-v1.4 (pinned here since 2026-08-04)
+     measures output transitions by direction instead of by crossing ordinal,
+     so the tables are positive and correctly labelled. STA no longer clamps
+     anything to zero.
+     What remains is not a defect but a fact about rings: a 31-stage loop
+     settles at 12-87 ps of slew depending on cell and corner, and the NLDM's
+     first characterized row is 20 ps. You cannot look up a slew nobody
+     measured. So the `self-consistent` column solves the ring's own fixed
+     point — each stage's input slew IS the previous stage's output slew —
+     and that is the number to quote.
 
 Point either mode at `harden/runs/*` (all-own bare die) or at the submitted
 build's run directory to compare the two libraries on the same structure.
@@ -254,14 +255,23 @@ def self_consistent(lib, cell, wire_fF, iters=200, tol=1e-9):
         d_rise = cell_rise(s_fall, load)     an inverting output rises
         d_fall = cell_fall(s_rise, load)     because its input fell
 
-    **`abs()` on the transitions is not a hack, it is the M11 workaround.**
-    Every inverting cell in this library carries NEGATIVE transition tables
-    (INV/NAND2/NOR2: 100% negative; BUF/DFF: 100% positive), which is a
-    characterizer sign convention applied without regard to unateness. The
-    magnitudes are physically sensible — INV_X1 is 11.3 ps into 2 fF where
-    BUF_X1, two stages, is 21.5 ps — so the sign is wrong and the number is
-    right. OpenSTA does not take the magnitude: it clamps to zero, which is
-    why the SDF is faster than anything characterized.
+    The `abs()` below is now a NO-OP and is kept only as a guard. It used to
+    be the M11 workaround, back when every inverting cell carried negative
+    transition tables; `stdcells` lib-v1.4 fixed that at the source and this
+    repo has been pinned to it since 2026-08-04, so the tables are positive.
+
+    ⚠️ M11 was NOT the sign error it was written up as, and this function was
+    wrong in a way that happened not to matter. The tables were negated AND
+    EXCHANGED, so `abs(rise_transition)` returned the FALL time — meaning the
+    loop below drove `d_rise = cell_rise(s_fall)` with the wrong-direction
+    slew, and vice versa. Re-running against a fixed library moved the
+    predictions by **under 1%** (tt: INV 625.0 → 628.4 MHz, NAND2 459.1 →
+    460.1, NOR2 294.5 → 294.8). That near-invariance is structural, not luck:
+    a ring's period is the SUM of both edges over the loop, so exchanging
+    which slew drives which edge preserves the total almost exactly. Do not
+    read it as evidence that the old library was fine — the same defect cost
+    766 ps of setup slack on stdcells' own CORDIC-1 harden, where the two
+    edges are not summed.
     """
     tabs = lib[cell]["tab"]
     load = lib[cell]["pins"]["A"] + wire_fF / 1000.0
@@ -391,13 +401,17 @@ def silicon(run_dir):
                   f"{f[2]/1e6:>9.1f}M{f[3]/1e6:>16.1f}M"
                   f"{count_of(f[3]):>13.0f}")
 
-        # the fixed-point slews, and how far outside the characterized grid
-        # STA was operating (it clamps these to zero — M11)
+        # The ring's own fixed-point slews. These sit BELOW the characterized
+        # grid's first row, which is why the column exists at all: the NLDM
+        # cannot be asked about a slew it never measured, so the fixed point
+        # is the honest operating point rather than an interpolated one.
+        # (Before lib-v1.4 this line also reported "STA used 0", because M11's
+        # negative tables were clamped. That is fixed at the source now.)
         i1 = lib["INV_X1"]["tab"]["cell_rise"][0]
         print("  fixed-point slews (ps, rise/fall): "
               + "  ".join(f"{c} {r*1000:.1f}/{f*1000:.1f}"
                           for c, (r, f) in sorted(slews.items()))
-              + f"   [grid starts at {i1[0]*1000:.0f} ps; STA used 0]")
+              + f"   [grid starts at {i1[0]*1000:.0f} ps]")
 
     print("\nColumns, each adding one correction to the one before it:\n"
           "  raw SDF          what the SDF says, and what a GL sim of that "
