@@ -46,24 +46,37 @@ understatement on the cell driving the slowest ring on this die.
 | M9 | max-cap violations (clock tree + repair buffers) | 🟡 **OPEN, characterised** — now **5**, down from 8; no ring node at any corner |
 | — | `gds` workflow red since 2026-07-25 | ✅ **GREEN** — the linter now runs clean via `CELL_VERILOG_MODELS`, so the upstream `cat` finds its log |
 | M5 | Documented read sequence permits a torn 24-bit count | ✅ **FIXED** — doc bug only; hardware and bring-up script were already correct |
-| M6 | Prescaler in the RO clock domain has no generated-clock constraint | ✅ **CLOSED** — signoff SDC added; the counter closes at 1.094 ns with 266 ps slack |
+| M6 | Prescaler in the RO clock domain has no generated-clock constraint | ✅ **CLOSED, re-measured on lib-v1.4 2026-08-04** — all nine views close, worst **+517 ps**; quote the **1.27x headroom**, not a slack figure |
+| M13 | `check_signoff.py` had **no timing entry at all** — a green run carried 5 setup violations | ✅ **CLOSED 2026-08-04** — setup/hold violation counts added; the previously-green run now fails |
+| M14 | `ro_clk` SDC period table stale (pre-M7 predictions), over-constraining 35-47% | ✅ **CLOSED 2026-08-04** — regenerated from the corrected model; that gap *was* M13's violations |
 | M7 | `ring_prediction.py` may sum cell delays only, not interconnect | ✅ **CLOSED** — the quoted prediction was **32-46% optimistic**; now computed from SPEF + a self-consistent slew, per corner |
 | M11 | Liberty transition tables negative for inverting cells → STA timed the chip at **zero slew** | ✅ **CLOSED 2026-08-04** — fixed at source in `stdcells` **lib-v1.4** and re-pinned here. Was **negated AND exchanged**, not a sign error |
 | M12 | 58 max-slew violations at ss, hidden by M11's clamped-to-zero slews | ✅ **CLOSED 2026-08-04** — repair could not see them (one estimated-parasitic view, no RC corners yet); fixed with repair margin, not a looser limit |
 | L8 | User-facing text quotes one PVT although `lib.lock` pins three | ✅ **FIXED** — text corrected, and the stated *reason* was wrong (see M10) |
 | M10 | Corner-aware STA was not in effect (0.2% of arcs moved between PVT views) | ✅ **FIXED** — now **98.5%**, max delta 155% |
 
-**Still do not pay — but the list is now two items, and neither is a HIGH.**
-M11 and M12 are closed, and for the first time the timing signoff is capable
-of failing: `design__max_slew_violation__count = 0` is now a result rather
-than an artefact of clamping. **All eight review-brief questions are closed**
-as of 2026-08-04. Open:
-1. **M9** — max-cap, now 5 (was 8), no ring node at any corner.
-2. **M6 must be re-measured** — see the embargo below.
+**The list is down to ONE item, and it is not a HIGH: M9** — max-cap, now 5
+(was 8), none on a ring node at any corner. All eight review-brief questions
+are closed, and so are M11, M12, M13 and M14.
 
-⚠️ **M6's "266 ps of slack" below was measured on the pre-lib-v1.4 library and
-has NOT been re-measured.** Its direction survives; the margin does not. Do
-not quote that number until it is re-run.
+For the first time the timing signoff is capable of failing in both the ways
+it needs to be: `design__max_slew_violation__count = 0` is a result rather
+than an artefact of clamping (M11/M12), and `timing__setup_vio__count = 0` is
+now *checked at all* (M13). The green run of 2026-08-04 reports **19
+must-be-zero metrics all present and zero**.
+
+⛔ **That is still not a recommendation to pay.** It is a statement that the
+signoff now says something. What it cannot tell you is whether the *physics*
+is right — that is what the die is for.
+
+✅ **M6 HAS NOW BEEN RE-MEASURED (2026-08-04, run 30941144711) and the
+embargo is lifted — but "266 ps" is dead, and so is quoting a slack figure at
+all.** All nine views close with **+517 to +578 ps**, worst at `max_ss`. The
+useful number is the RATIO: the counter tolerates a ring **1.27x faster than
+predicted** at the binding corner (1.39x at tt, 1.53x at ff). That is what to
+check the first silicon measurement against, because the thing that could
+break the instrument is silicon ringing faster than the model says — not a
+picosecond count against a constraint we chose.
 
 **What M11 cost, so the size of it is on record.** On stdcells' own CORDIC-1
 harden at a byte-identical netlist, correcting the library removed **766 ps of
