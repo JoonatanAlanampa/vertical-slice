@@ -43,7 +43,10 @@ understatement on the cell driving the slowest ring on this die.
 | H3 | Buffers loading the ring oscillators | ✅ **FIXED** — 0 on ring nodes in the SYNTHESIZED *and* ROUTED netlists; both audited in CI |
 | H4 | Ring select and window length are live during a measurement | ✅ **FIXED** — latched at arm, test proves it |
 | B2 | "No top-level LVS/DRC signoff on the all-own GDS" | ✅ **NOT A GAP** — it runs, is enforced, and matches uniquely; now asserted in CI |
-| M9 | max-cap violations (clock tree + repair buffers) | 🟡 **OPEN, characterised** — now **5**, down from 8; no ring node at any corner |
+| M9 | max-cap violations (clock tree + repair buffers) | ✅ **CLOSED 2026-08-05** — **0 at all nine corners**, was 5 (baseline 8). It was downstream of M15 and needed no knob of its own |
+| M15 | `max_fanout` check structurally incapable of failing — the own liberty declared no fanout load at all | ✅ **CLOSED 2026-08-05** — fixed at source in `stdcells` **lib-v1.5**; 22 real violations surfaced, then **0**, independently verified on the shipped netlist |
+| M16 | Every `internal_power` table silently discarded by OpenSTA (wrong template namespace) | ✅ **CLOSED 2026-08-05** — `power_lut_template` in lib-v1.5; this chip's reported power was understating by ~32% |
+| M17 | **Hold is signed off against a DFF hold constraint of `0.0` that was never measured** | 🔴 **NEW, OPEN 2026-08-05** — `timing__hold_vio__count = 0` and worst hold slack is **1.5 ps**. See below |
 | — | `gds` workflow red since 2026-07-25 | ✅ **GREEN** — the linter now runs clean via `CELL_VERILOG_MODELS`, so the upstream `cat` finds its log |
 | M5 | Documented read sequence permits a torn 24-bit count | ✅ **FIXED** — doc bug only; hardware and bring-up script were already correct |
 | M6 | Prescaler in the RO clock domain has no generated-clock constraint | ✅ **CLOSED, re-measured on lib-v1.4 2026-08-04** — all nine views close, worst **+517 ps**; quote the **1.27x headroom**, not a slack figure |
@@ -55,9 +58,92 @@ understatement on the cell driving the slowest ring on this die.
 | L8 | User-facing text quotes one PVT although `lib.lock` pins three | ✅ **FIXED** — text corrected, and the stated *reason* was wrong (see M10) |
 | M10 | Corner-aware STA was not in effect (0.2% of arcs moved between PVT views) | ✅ **FIXED** — now **98.5%**, max delta 155% |
 
-**The list is down to ONE item, and it is not a HIGH: M9** — max-cap, now 5
-(was 8), none on a ring node at any corner. All eight review-brief questions
-are closed, and so are M11, M12, M13 and M14.
+**M9 is CLOSED and the list is down to ONE item, which is NEW: M17.** Every
+must-be-zero metric is zero, max-cap is zero at all nine corners for the first
+time, and LVS matches uniquely over 6953 devices. All eight review-brief
+questions are closed, and so are M11, M12, M13, M14, M15 and M16.
+
+### M15 → M9, closed together 2026-08-05 (the whole story in one place)
+
+`design__max_fanout_violation__count` had read 0 on every run this repo ever
+produced, and was **structurally incapable of reading anything else**: the own
+liberty declared neither `fanout_load` nor `default_fanout_load`, so OpenSTA
+summed every net's fanout to 0.0 and `set_max_fanout 10` could not be exceeded
+by any circuit. It sat in `check_signoff.py`'s MUST_BE_ZERO list being quoted
+as assurance. Fixed at source in `stdcells` lib-v1.5 by one header line.
+
+**It was bigger than a dead check — it was a limit that did not exist for any
+tool in the flow.** OpenROAD's `repair_design` has no fanout flag; it repairs
+whatever limits it can see, and it could see none. Measured on a 12-sink net,
+one variable changed:
+
+```
+lib-v1.4:  Found 0 fanout violations,  0 buffers inserted,  13 -> 13 cells
+lib-v1.5:  Found 1 fanout violation,   1 buffer inserted,   13 -> 14 cells
+```
+
+That is why nets reached 29 sinks unchallenged, and the violators' own names
+said so: `max_cap75..83`, `load_slew29..72` and `wire31..82` were buffers
+`repair_design` had inserted to fix capacitance and slew, and then loaded with
+20-29 sinks apiece because nothing counted them. **The repair pass created the
+nets that violated.**
+
+Consequently M9 was never an independent item. Its two remaining violators at
+tt were `wire82/Y` and `max_cap79/Y`, carrying **62.08 fF and 57.83 fF of PIN
+load** on 29 and 27 sinks against a 100 fF limit. Once the limit existed, the
+flow split them itself and both went away.
+
+| | `0935bba` pre-M15 | `19ded23` re-pin | `a13fd30` + CTS margin |
+| --- | --- | --- | --- |
+| max-fanout violations | 0 *(dead check)* | **22 → 1** | **0** |
+| max-cap violations (M9) | 5 | 1 | **0** |
+| setup WS | 0.5166 | 0.5021 | **0.5292** |
+| instances | 6935 | 6963 | 6953 |
+
+The last net standing was `clkbuf_0_clk/Y` (fanout 16, cap 0.1157) — the top
+branch net of the clock H-tree, not a data path and not a ring node.
+TritonCTS's own log shows it already honours a fanout of 10 **at the leaves**
+(`Stop criterion found. Max number of sinks is 10`, 49 buffers, min *and* max
+3 deep). It was closed with `CTS_MAX_CAP` 0.05 → 0.025 — margin, in M12's
+shape, because CTS clusters against *estimated* wire while RCX measures the
+real thing (~81 fF of that 116 was wire, only ~34 was pin load). **`set_max_fanout`
+was not touched and the metric was not removed from MUST_BE_ZERO.** It cost
+2 clock buffers and *improved* setup slack at every corner.
+
+Verification, because a 0 from a check that used to be incapable of failing is
+exactly what this file exists to distrust: the shipped netlist was parsed
+independently — **0 nets above 10, max fanout exactly 10** — and
+`check_signoff.py` now NAMES max-fanout violators per corner and fails if any
+is a ring node, mirroring max-cap. That reporting was proved by planting a
+ring-node row in a real `checks.rpt`, which fails with the ring message.
+
+### M17 — hold is signed off against a constraint nobody measured. NEW, OPEN.
+
+`timing__hold_vio__count = 0`, and the worst hold slack is **1.5 ps** at
+`min_ff_n40C_1v95`. Both numbers are computed against a DFF hold requirement
+of **`0.0` ns** — a placeholder that has never been measured. It is a known
+deferral on the library side (`stdcells` README: "Deferred… measuring the DFF
+hold constraint (currently 0.0)"), but its consequence here had not been
+stated: **a hold check against a zero requirement cannot fail for the reason
+hold actually fails**, so that 0 is weaker evidence than it looks.
+
+This is the eighth instance of this project's signature defect and it is
+recorded, not fixed. Two things make it newly material rather than merely
+old news:
+
+1. **The apparent margin was mostly consumed by correct work.** Worst hold
+   slack went 8.74 ps → 1.56 ps at the lib-v1.5 re-pin — attributable to the
+   fanout repair restructuring data paths, not to the CTS change (`a13fd30`
+   left it at 1.53 ps). The design is doing the right thing; there is simply
+   very little left between it and a requirement of zero.
+2. **1.5 ps is not a margin on silicon.** It is far below OCV, jitter and the
+   2 ps timestep resolution of the characterizer that produced the library.
+
+⛔ It does not change the no-submission rule, which stands on the user's own
+directive regardless. But **M6's headroom ratios and every hold statement in
+this file are conditional on a hold constraint of 0.0**, and closing M17 means
+measuring `t_hold` in `stdcells/flow/characterize.py` the way `setup` already
+is, then re-checking whether that 1.5 ps survives.
 
 For the first time the timing signoff is capable of failing in both the ways
 it needs to be: `design__max_slew_violation__count = 0` is a result rather
