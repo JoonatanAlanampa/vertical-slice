@@ -4,6 +4,7 @@ library (own_sky130_tt_025C_1v80) {
   time_unit : "1ns"; voltage_unit : "1V"; current_unit : "1mA";
   pulling_resistance_unit : "1kohm"; capacitive_load_unit (1, pf);
   leakage_power_unit : "1nW";
+  default_fanout_load : 1;
   nom_process : 1; nom_voltage : 1.8; nom_temperature : 25;
   operating_conditions (tt_025C_1v80) { process : 1; voltage : 1.8; temperature : 25; }
   default_operating_conditions : tt_025C_1v80;
@@ -16,7 +17,7 @@ library (own_sky130_tt_025C_1v80) {
     index_1("0.020, 0.050, 0.300, 1.500");
     index_2("0.002, 0.005, 0.025, 0.100");
   }
-  lu_table_template (pwr44) {
+  power_lut_template (pwr44) {
     variable_1 : input_transition_time; variable_2 : total_output_net_capacitance;
     index_1("0.020, 0.050, 0.300, 1.500");
     index_2("0.002, 0.005, 0.025, 0.100");
