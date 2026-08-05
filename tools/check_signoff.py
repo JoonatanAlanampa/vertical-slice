@@ -110,27 +110,40 @@ def find_lvs_report(root):
     return Path(hits[-1]) if hits else None
 
 
-def max_cap_violators(root):
-    """(pin, limit, cap, slack) per corner, from the post-P&R STA checks."""
+def violators(root, section):
+    """(pin, limit, value, slack) per corner, from the post-P&R STA checks.
+
+    `section` is the OpenSTA check-type heading, e.g. "max capacitance" or
+    "max fanout". The slack column is blank when it rounds to zero, so it is
+    optional here — a row that parsed as "no slack" is still VIOLATED.
+    """
     out = {}
     for f in sorted(glob.glob(f"{root}/**/*-openroad-stapostpnr/*/checks.rpt",
                               recursive=True)):
         corner = Path(f).parent.name
         txt = Path(f).read_text(errors="replace")
-        m = re.search(r"max capacitance\s*\n\s*Pin.*?\n-+\n(.*?)(?:\n\s*\n|\Z)",
+        m = re.search(rf"{section}\s*\n\s*Pin.*?\n-+\n(.*?)(?:\n\s*\n|\Z)",
                       txt, re.S)
         if not m:
             continue
         rows = []
         for line in m.group(1).splitlines():
-            g = re.match(r"\s*(\S+)\s+([\d.]+)\s+([\d.]+)\s+(-?[\d.]+)\s*\(VIOLATED\)",
-                         line)
+            g = re.match(r"\s*(\S+)\s+([\d.]+)\s+([\d.]+)\s+(-?[\d.]+)?"
+                         r"\s*\(VIOLATED\)", line)
             if g:
                 rows.append((g.group(1), float(g.group(2)), float(g.group(3)),
-                             float(g.group(4))))
+                             float(g.group(4) or 0.0)))
         if rows:
             out[corner] = rows
     return out
+
+
+def max_cap_violators(root):
+    return violators(root, "max capacitance")
+
+
+def max_fanout_violators(root):
+    return violators(root, "max fanout")
 
 
 def main():
@@ -194,6 +207,35 @@ def main():
                     f"max-cap violation on a RING NODE ({corner}): {pin} "
                     f"cap {cap:.4f} > {lim:.3f}. A loaded oscillator reports the "
                     f"wrong cell delay — this is the failure H3 was.")
+
+    # ---- M15: the same treatment for fanout, now that it is a real check ---
+    # design__max_fanout_violation__count is in MUST_BE_ZERO above, so a
+    # non-zero count already fails the run. This exists because a COUNT cannot
+    # say WHAT is over, and the two possibilities are not remotely equivalent:
+    # a clock root one sink over its budget is a tuning item, while a ring node
+    # that has acquired extra sinks means the instrument is being loaded — the
+    # H3 failure, arriving by the road M15 left open for four releases. The
+    # max-cap block above has named its violators since 2026-08-03 for exactly
+    # this reason; until lib-v1.5 the fanout metric was structurally incapable
+    # of being non-zero, so there was never anything to name.
+    fviol = max_fanout_violators(root)
+    mfo = metrics.get("design__max_fanout_violation__count")
+    if mfo and not fviol:
+        notes.append(f"{mfo} max-fanout violations reported but no post-P&R STA "
+                     f"checks.rpt could be parsed — cannot prove none is a ring node")
+    for corner, rows in sorted(fviol.items()):
+        print(f"\nmax-fanout violators [{corner}]:")
+        for pin, lim, fanout, slack in rows:
+            ring = any(p in pin for p in RING_PATTERNS)
+            print(f"  {pin:<26} limit {lim:.0f}  fanout {fanout:.0f}  "
+                  f"slack {slack:+.0f}{'   <-- RING NODE' if ring else ''}")
+            if ring:
+                fails.append(
+                    f"max-fanout violation on a RING NODE ({corner}): {pin} "
+                    f"drives {fanout:.0f} sinks against a limit of {lim:.0f}. "
+                    f"Every ring node should drive exactly one next stage plus "
+                    f"the three taps; more than that means the oscillator is "
+                    f"loaded and the delay it reports is not the cell's.")
 
     # ---- the LVS verdict itself, not just its error count -----------------
     rpt = find_lvs_report(root)
