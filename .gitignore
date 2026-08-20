@@ -30,3 +30,7 @@ harden/*.log
 pdk-root/
 __pycache__/
 *.pyc
+
+# check_min_pulse_width.py stages the netlist, SPEF and liberties it hands
+# to OpenSTA here. Generated per run, never an input.
+out/

@@ -117,6 +117,26 @@ jobs:
         if: success() || failure()
         run: python3 flow/check_corner_spread.py runs
 
+      # M19. librelane emits NO min-pulse-width metric -- verified by listing
+      # every key of a real final/metrics.json -- so there was nothing to add
+      # to check_signoff.py's MUST_BE_ZERO list and the check has to be RUN.
+      # It matters on this die and not in general: the ring-oscillator
+      # prescaler is clocked DIRECTLY by the ring, so ro_clk's half period is
+      # a real clock pulse at a real flop, and it is the fastest clock here by
+      # two orders of magnitude (679 ps at ff against clk's 10 ns). A flop
+      # that cannot capture on it gives a counter that does not count -- the
+      # one number this chip exists to measure, wrong without being zero.
+      # The script reads harden/signoff.sdc, NOT the run's final/sdc: ro_clk
+      # is deliberately kept out of the PNR constraints (CTS would build a
+      # clock tree on a ring oscillator), so the PNR sdc would have let this
+      # pass while never looking at the ring at all.
+      # It carries its own positive control -- inflating the requirement to
+      # 9 ns must flag the ring flops -- because "0 violations" is the exact
+      # shape of the four checks this repo has already caught not looking.
+      - name: Clock pulses meet the library's min_pulse_width (M19)
+        if: success() || failure()
+        run: python3 flow/check_min_pulse_width.py runs
+
   precheck:
     needs: gds
     runs-on: ubuntu-24.04
