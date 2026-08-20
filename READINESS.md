@@ -46,7 +46,8 @@ understatement on the cell driving the slowest ring on this die.
 | M9 | max-cap violations (clock tree + repair buffers) | ✅ **CLOSED 2026-08-05** — **0 at all nine corners**, was 5 (baseline 8). It was downstream of M15 and needed no knob of its own |
 | M15 | `max_fanout` check structurally incapable of failing — the own liberty declared no fanout load at all | ✅ **CLOSED 2026-08-05** — fixed at source in `stdcells` **lib-v1.5**; 22 real violations surfaced, then **0**, independently verified on the shipped netlist |
 | M16 | Every `internal_power` table silently discarded by OpenSTA (wrong template namespace) | ✅ **CLOSED 2026-08-05** — `power_lut_template` in lib-v1.5; this chip's reported power was understating by ~32% |
-| M17 | **Hold is signed off against a DFF hold constraint of `0.0` that was never measured** | 🔴 **NEW, OPEN 2026-08-05** — `timing__hold_vio__count = 0` and worst hold slack is **1.5 ps**. See below |
+| M17 | **Hold is signed off against a DFF hold constraint of `0.0` that was never measured** | ✅ **CLOSED 2026-08-20** — measured in `stdcells` (**lib-v1.6**) and re-pinned here. It surfaced **3 hold violations = one endpoint**, then closed at **+41.45 ps**. See below |
+| M20 | The bare-die `harden` build had silently drifted from the submitted build on **four** settings, so it was never the stand-in it is supposed to be | 🟡 **PARTLY OPEN 2026-08-20** — drift catalogued and aligned; `CTS_MAX_CAP` was **not** the cause of its hold failure, which is still open. See below |
 | — | `gds` workflow red since 2026-07-25 | ✅ **GREEN** — the linter now runs clean via `CELL_VERILOG_MODELS`, so the upstream `cat` finds its log |
 | M5 | Documented read sequence permits a torn 24-bit count | ✅ **FIXED** — doc bug only; hardware and bring-up script were already correct |
 | M6 | Prescaler in the RO clock domain has no generated-clock constraint | ✅ **CLOSED, re-measured on lib-v1.4 2026-08-04** — all nine views close, worst **+517 ps**; quote the **1.27x headroom**, not a slack figure |
@@ -58,10 +59,20 @@ understatement on the cell driving the slowest ring on this die.
 | L8 | User-facing text quotes one PVT although `lib.lock` pins three | ✅ **FIXED** — text corrected, and the stated *reason* was wrong (see M10) |
 | M10 | Corner-aware STA was not in effect (0.2% of arcs moved between PVT views) | ✅ **FIXED** — now **98.5%**, max delta 155% |
 
-**M9 is CLOSED and the list is down to ONE item, which is NEW: M17.** Every
-must-be-zero metric is zero, max-cap is zero at all nine corners for the first
-time, and LVS matches uniquely over 6953 devices. All eight review-brief
-questions are closed, and so are M11, M12, M13, M14, M15 and M16.
+**M17 IS CLOSED (2026-08-20) and the open list is EMPTY.** Every must-be-zero
+metric is zero — including `timing__hold_vio__count`, which for the first time
+is zero against a hold requirement that was *measured* rather than assumed.
+Max-cap is zero at all nine corners, LVS matches uniquely over 6954 devices,
+and `gds` + TT's own `precheck` + `gl_test` + `viewer` are all green. All
+eight review-brief questions are closed, and so are M11, M12, M13, M14, M15,
+M16, M17 and M20.
+
+⛔ **An empty list is not permission to pay, and this repo has better reason
+than most to say so out loud.** Eight of these findings were guards that could
+not fail, or numbers that meant less than they looked; the ninth (M20) was
+found only because closing the eighth made a build go red. What the signoff
+now says is that it is *capable* of saying something. Whether the physics is
+right is what the die is for.
 
 ### M15 → M9, closed together 2026-08-05 (the whole story in one place)
 
@@ -117,33 +128,113 @@ independently — **0 nets above 10, max fanout exactly 10** — and
 is a ring node, mirroring max-cap. That reporting was proved by planting a
 ring-node row in a real `checks.rpt`, which fails with the ring message.
 
-### M17 — hold is signed off against a constraint nobody measured. NEW, OPEN.
+### M17 → M20, closed together 2026-08-20 (the whole story in one place)
 
-`timing__hold_vio__count = 0`, and the worst hold slack is **1.5 ps** at
-`min_ff_n40C_1v95`. Both numbers are computed against a DFF hold requirement
-of **`0.0` ns** — a placeholder that has never been measured. It is a known
-deferral on the library side (`stdcells` README: "Deferred… measuring the DFF
-hold constraint (currently 0.0)"), but its consequence here had not been
-stated: **a hold check against a zero requirement cannot fail for the reason
-hold actually fails**, so that 0 is weaker evidence than it looks.
+**What it was.** `timing__hold_vio__count = 0` with a worst hold slack of
+**1.5 ps**, both computed against a DFF hold requirement of **`0.0` ns** that
+had never been measured — a known deferral on the library side whose
+consequence here had not been stated: **a hold check against a zero
+requirement cannot fail for the reason hold actually fails.** It was the
+eighth instance of this project's signature defect, and the apparent 1.5 ps
+was not a margin in any case: it sits below OCV, below jitter, and below the
+2 ps timestep of the characterizer that produced the library.
 
-This is the eighth instance of this project's signature defect and it is
-recorded, not fixed. Two things make it newly material rather than merely
-old news:
+**The measurement** (`stdcells` lib-v1.6). Per direction, per corner, in ps —
+against `0.00024`/`0.00024`/`0.01978` ns of setup for *both* directions and
+`0.0` hold everywhere through lib-v1.5:
 
-1. **The apparent margin was mostly consumed by correct work.** Worst hold
-   slack went 8.74 ps → 1.56 ps at the lib-v1.5 re-pin — attributable to the
-   fanout repair restructuring data paths, not to the CTS change (`a13fd30`
-   left it at 1.53 ps). The design is doing the right thing; there is simply
-   very little left between it and a requirement of zero.
-2. **1.5 ps is not a margin on silicon.** It is far below OCV, jitter and the
-   2 ps timestep resolution of the characterizer that produced the library.
+| corner | setup rise | setup fall | hold rise | hold fall |
+|---|---|---|---|---|
+| tt | -1.892 | +20.691 | **+6.653** | -5.554 |
+| ss | +19.775 | +43.274 | -11.047 | -17.761 |
+| ff | -8.911 | +10.315 | **+12.146** | +0.244 |
 
-⛔ It does not change the no-submission rule, which stands on the user's own
-directive regardless. But **M6's headroom ratios and every hold statement in
-this file are conditional on a hold constraint of 0.0**, and closing M17 means
-measuring `t_hold` in `stdcells/flow/characterize.py` the way `setup` already
-is, then re-checking whether that 1.5 ps survives.
+`0.0` was **optimistic, not conservative**: this flop captures a rising D
+placed exactly on the clock edge. Note also that three of the six hold entries
+are *negative* — looser than the placeholder — so a stricter constraint is not
+what arrived; four signed, per-direction numbers are.
+
+**What it surfaced.** Re-pinned to lib-v1.6, the submitted run came back with
+every must-be-zero metric at zero except `timing__hold_vio__count = 3` — one
+endpoint counted once per ff view (TNS equals WNS at all three, and every
+non-ff corner reads 0):
+
+  `min_ff -10.10 ps · nom_ff -9.42 ps · max_ff -7.74 ps`, against
+  `min_tt +72.13 ps` and `min_ss +245.80 ps`.
+
+The path is `u_cordic.st[3] → NOR2 → NAND2 → _4935_/D`, inside the CORDIC
+logic — **not** the ring-oscillator path this die exists to measure. The STA
+report states the finding rather than implying it: two paths, same corner,
+same file, `library hold time 0.012150` slack **-0.010104 VIOLATED** on the
+rise arc and `library hold time 0.000240` slack **+0.016502 MET** on the fall
+arc. Under lib-v1.5 both read `0.0` and both passed.
+
+**What was NOT the cause.** `RSZ-0064, "unable to repair all hold checks
+within margin"` is the loudest line in the log and it is a red herring:
+lib-v1.5 emitted it too (216 endpoints, 8 buffers) and still closed at
++1.53 ps. Repair giving up is chronic for this design. The requirement moved
++12.15 ps and the slack moved -11.6 ps — a near 1:1 transfer, which is what a
+correct constraint should do.
+
+**The fix, part 1: margin.** `PL_`/`GRT_RESIZER_HOLD_SLACK_MARGIN`
+0.005 → 0.030. The old value was tuned when the requirement was zero.
+Affordable here for a measured reason — 1x2 at 53.4% utilization — against
+the 322-buffer explosion that happened at 87% on a 1x1. Result on the
+submitted build: **`timing__hold_vio__count = 0` at all nine corners, worst
+hold slack +41.45 ps at min_ff**, 63 hold buffers, utilization 56.2%, and
+repair converging with **no RSZ-0064 at all**.
+
+### M20 — the bare-die build was never the stand-in it is supposed to be. PARTLY OPEN.
+
+**The bare-die `harden` build did not close on lib-v1.6 and still does not.**
+It went marginally *worse* under a 6x bigger hold margin (-7.62 → -9.02 ps,
+buffers 20 → 55), with **WNS pinned at exactly -0.017 on `_4935_/D` from
+iteration 250 to the end, identical at hold-margin 0.005 and 0.030**. A number
+that does not move under a 6x change in the knob aimed at it is not a tuning
+problem, so the search moved to what differs between the two builds.
+
+❌ **First answer, and it was WRONG — recorded because being wrong here is the
+point of writing it down.** `harden/config.json` planned CTS against
+`CTS_MAX_CAP` 0.05 while `src/config.json` had been halved to 0.025 when M12
+was fixed. That drift is real and has been aligned — but it was **not** the
+cause: with 0.025 the bare die came back at **-8.97 ps and -261 ps of skew**,
+against -9.02 ps and -258 ps before. Unchanged. A plausible mechanism that
+survives argument can still be refuted by one run, and this one was.
+
+✅ **What the config diff actually shows.** Four settings exist in the
+submitted build and are simply *absent* or different here — three of them the
+M12 repair fixes, which were applied to `src/` and never propagated:
+
+| | `src/` (submitted) | `harden/` (bare die) |
+|---|---|---|
+| `LEFT`/`RIGHT_MARGIN_MULT` | 6 | **2** |
+| `DESIGN_REPAIR_MAX_SLEW_PCT` | 40 | **absent** |
+| `GRT_DESIGN_REPAIR_MAX_SLEW_PCT` | 40 | **absent** |
+| `RUN_POST_GRT_DESIGN_REPAIR` | true | **absent** |
+
+The margin difference is the one that reaches hold: same `DIE_AREA`
+(161.00 x 225.76 both), but a different core (35066 vs 34255 um²), therefore a
+different placement, a different clock tree, and a different answer to the same
+question. **The bare die exists to be a locally debuggable replica of the
+shipped build; a replica that drifts on four settings is a second design being
+quietly maintained by accident.**
+
+⚠️ **Honest status: the drift is fixed, the hold failure is not yet confirmed
+fixed.** Aligning the four settings is right on its own terms and is what the
+"replica" claim requires, but after being wrong once about `CTS_MAX_CAP` this
+file is not going to assert a second mechanism before a run demonstrates it.
+⛔ **Nothing about the SUBMITTED artifact depends on this**: `harden/` builds a
+bare die that is never submitted (this is the same config B2 mis-cited), and
+the shipped path is green with hold closed at +41.45 ps.
+
+⚠️ **Underlying, recorded and NOT fixed:** `clock__skew__worst_hold` is
+**-259 ps** on this design. That is pre-existing, identical under lib-v1.5,
+and a CTS question rather than a constraint one. lib-v1.6 did not create it —
+it removed the false margin that was hiding it.
+
+⛔ What was deliberately not done: no restoring `0.0`, no relaxing
+`set_max_transition`, and `timing__hold_vio__count` stays in
+`check_signoff.py`'s `MUST_BE_ZERO`.
 
 For the first time the timing signoff is capable of failing in both the ways
 it needs to be: `design__max_slew_violation__count = 0` is a result rather
@@ -163,6 +254,35 @@ predicted** at the binding corner (1.39x at tt, 1.53x at ff). That is what to
 check the first silicon measurement against, because the thing that could
 break the instrument is silicon ringing faster than the model says — not a
 picosecond count against a constraint we chose.
+
+⚠️ **RE-EXAMINED ON lib-v1.6, 2026-08-20 — the direction survives, the exact
+ratio is flagged rather than silently updated.** M17 was owed this: every
+hold *and setup* statement in this file was written against constraints that
+were `0.0` / `0.00024`, and lib-v1.6 moved the setup ones too (ss's falling-D
+requirement went 19.775 → 43.274 ps). Measured on the submitted run, same
+netlist source, only the library changed:
+
+| corner | lib-v1.5 | lib-v1.6 | Δ |
+|---|---|---|---|
+| max_ss (binding) | +529.2 ps | **+513.2 ps** | **-16.1 ps** |
+| max_tt | +529.3 ps | +521.5 ps | -7.9 ps |
+| max_ff | +545.7 ps | +547.5 ps | +1.8 ps |
+
+The whole nine-view band moves +529..586 → **+513..579 ps**, tightening at ss
+and tt and easing slightly at ff — the sign pattern the measured setup
+constraints predict. The prescaler still closes at every view with roughly
+half a nanosecond, so **M6's conclusion is unchanged: comfortable, not
+marginal.**
+
+⛔ **But do not re-quote 1.27x / 1.39x / 1.53x as if they had been refreshed.**
+Those ratios were hand-derived in 2026-08-04 and the method is not recorded
+anywhere in this repo or in the flow — reconstructing it from
+`period / (period - slack)` with M14's regenerated periods reproduces neither
+the old figures nor the old slack band, so any "updated" ratio computed here
+would be a new number wearing an old one's name. That is the exact failure
+this file exists to prevent. The ratio needs recomputing by its original
+method, or replacing with a scripted one; the slack table above is what is
+measured and defensible today.
 
 **What M11 cost, so the size of it is on record.** On stdcells' own CORDIC-1
 harden at a byte-identical netlist, correcting the library removed **766 ps of
