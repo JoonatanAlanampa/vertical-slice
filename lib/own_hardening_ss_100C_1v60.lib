@@ -628,10 +628,10 @@ library (own_sky130_ss_100C_1v60) {
         pin (D) { direction : input; capacitance : 0.001070;
           timing () { related_pin : "CLK"; timing_type : setup_rising;
             rise_constraint (scalar) { values("0.01978"); }
-            fall_constraint (scalar) { values("0.01978"); } }
+            fall_constraint (scalar) { values("0.04327"); } }
           timing () { related_pin : "CLK"; timing_type : hold_rising;
-            rise_constraint (scalar) { values("0.0"); }
-            fall_constraint (scalar) { values("0.0"); } } }
+            rise_constraint (scalar) { values("-0.01105"); }
+            fall_constraint (scalar) { values("-0.01776"); } } }
         pin (Q) { direction : output; function : "IQ";
           max_capacitance : 0.100; max_transition : 1.500;
           timing () { related_pin : "CLK"; timing_type : rising_edge;

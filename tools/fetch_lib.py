@@ -11,10 +11,19 @@ never live"); this script is the mechanism.
                                          # move to a new release and rewrite
                                          # lib.lock with the new checksums
 
-Downloaded artifacts land in lib/ (gitignored). lib.lock IS committed: it
-names the tag, the commit it dereferences to, and a sha256 per file, so a
-silently edited artifact fails the build instead of quietly changing what
-went to fabrication.
+Downloaded artifacts land in lib/, which IS COMMITTED -- this line used to
+say "(gitignored)" and that was stale as of 2026-07-25: the TinyTapeout
+submission is built from the all-own netlist, the TT flow runs no fetch
+step, and an artifact built from this repository can only use files that
+are IN this repository (see .gitignore's note, and blocker 1 in
+READINESS.md). So a re-pin is TWO things to commit, not one: lib.lock AND
+the refreshed lib/ files. Committing only the lock fails
+tools/verify_lib.py in the first step of gds.yaml, which is the guard
+working -- but the stale docstring is how you get there.
+
+lib.lock names the tag, the commit it dereferences to, and a sha256 per
+file, so a silently edited artifact fails the build instead of quietly
+changing what went to fabrication.
 """
 
 import argparse

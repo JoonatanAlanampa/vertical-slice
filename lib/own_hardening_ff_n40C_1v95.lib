@@ -627,11 +627,11 @@ library (own_sky130_ff_n40C_1v95) {
           capacitance : 0.001401; }
         pin (D) { direction : input; capacitance : 0.001138;
           timing () { related_pin : "CLK"; timing_type : setup_rising;
-            rise_constraint (scalar) { values("0.00024"); }
-            fall_constraint (scalar) { values("0.00024"); } }
+            rise_constraint (scalar) { values("-0.00891"); }
+            fall_constraint (scalar) { values("0.01031"); } }
           timing () { related_pin : "CLK"; timing_type : hold_rising;
-            rise_constraint (scalar) { values("0.0"); }
-            fall_constraint (scalar) { values("0.0"); } } }
+            rise_constraint (scalar) { values("0.01215"); }
+            fall_constraint (scalar) { values("0.00024"); } } }
         pin (Q) { direction : output; function : "IQ";
           max_capacitance : 0.100; max_transition : 1.500;
           timing () { related_pin : "CLK"; timing_type : rising_edge;
