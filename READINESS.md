@@ -47,7 +47,7 @@ understatement on the cell driving the slowest ring on this die.
 | M15 | `max_fanout` check structurally incapable of failing — the own liberty declared no fanout load at all | ✅ **CLOSED 2026-08-05** — fixed at source in `stdcells` **lib-v1.5**; 22 real violations surfaced, then **0**, independently verified on the shipped netlist |
 | M16 | Every `internal_power` table silently discarded by OpenSTA (wrong template namespace) | ✅ **CLOSED 2026-08-05** — `power_lut_template` in lib-v1.5; this chip's reported power was understating by ~32% |
 | M17 | **Hold is signed off against a DFF hold constraint of `0.0` that was never measured** | ✅ **CLOSED 2026-08-20** — measured in `stdcells` (**lib-v1.6**) and re-pinned here. It surfaced **3 hold violations = one endpoint**, then closed at **+41.45 ps**. See below |
-| M20 | The bare-die `harden` build had silently drifted from the submitted build on **four** settings, so it was never the stand-in it is supposed to be | 🟡 **PARTLY OPEN 2026-08-20** — drift catalogued and aligned; `CTS_MAX_CAP` was **not** the cause of its hold failure, which is still open. See below |
+| M20 | The bare-die `harden` build had silently drifted from the submitted build on **four** settings, so it was never the stand-in it is supposed to be | ✅ **CLOSED 2026-08-20** — aligning them closed hold at **+30.90 ps** and made `design__core__area` **identical** (34255.4). ⚠️ `CTS_MAX_CAP` was **not** the cause; that first answer is recorded as wrong. See below |
 | — | `gds` workflow red since 2026-07-25 | ✅ **GREEN** — the linter now runs clean via `CELL_VERILOG_MODELS`, so the upstream `cat` finds its log |
 | M5 | Documented read sequence permits a torn 24-bit count | ✅ **FIXED** — doc bug only; hardware and bring-up script were already correct |
 | M6 | Prescaler in the RO clock domain has no generated-clock constraint | ✅ **CLOSED, re-measured on lib-v1.4 2026-08-04** — all nine views close, worst **+517 ps**; quote the **1.27x headroom**, not a slack figure |
@@ -59,13 +59,13 @@ understatement on the cell driving the slowest ring on this die.
 | L8 | User-facing text quotes one PVT although `lib.lock` pins three | ✅ **FIXED** — text corrected, and the stated *reason* was wrong (see M10) |
 | M10 | Corner-aware STA was not in effect (0.2% of arcs moved between PVT views) | ✅ **FIXED** — now **98.5%**, max delta 155% |
 
-**M17 IS CLOSED (2026-08-20) and the open list is EMPTY.** Every must-be-zero
-metric is zero — including `timing__hold_vio__count`, which for the first time
-is zero against a hold requirement that was *measured* rather than assumed.
-Max-cap is zero at all nine corners, LVS matches uniquely over 6954 devices,
-and `gds` + TT's own `precheck` + `gl_test` + `viewer` are all green. All
-eight review-brief questions are closed, and so are M11, M12, M13, M14, M15,
-M16, M17 and M20.
+**M17 AND M20 ARE CLOSED (2026-08-20) and the open list is EMPTY.** Every
+must-be-zero metric is zero — including `timing__hold_vio__count`, which for
+the first time is zero against a hold requirement that was *measured* rather
+than assumed. Max-cap is zero at all nine corners, LVS matches uniquely over
+6954 devices, and `gds` + TT's own `precheck` + `gl_test` + `viewer` are all
+green, as is the bare-die `harden` build. All eight review-brief questions are
+closed, and so are M11, M12, M13, M14, M15, M16, M17 and M20.
 
 ⛔ **An empty list is not permission to pay, and this repo has better reason
 than most to say so out loud.** Eight of these findings were guards that could
@@ -219,13 +219,29 @@ question. **The bare die exists to be a locally debuggable replica of the
 shipped build; a replica that drifts on four settings is a second design being
 quietly maintained by accident.**
 
-⚠️ **Honest status: the drift is fixed, the hold failure is not yet confirmed
-fixed.** Aligning the four settings is right on its own terms and is what the
-"replica" claim requires, but after being wrong once about `CTS_MAX_CAP` this
-file is not going to assert a second mechanism before a run demonstrates it.
-⛔ **Nothing about the SUBMITTED artifact depends on this**: `harden/` builds a
-bare die that is never submitted (this is the same config B2 mis-cited), and
-the shipped path is green with hold closed at +41.45 ps.
+✅ **CLOSED — aligning the four settings fixed it, and the geometry says which
+one mattered.** `harden` is green: worst hold slack **-8.97 ps → +30.90 ps**,
+zero violations. The decisive change was the floorplan, and it is visible
+without inference: `design__core__area` went **35066.1 → 34255.4 um²**, which
+is *byte-identical* to the submitted build's, and utilization landed at
+**0.5632** against the submitted build's **0.5624**. Once the two builds place
+into the same core, they behave the same way.
+
+⭐ **And it independently re-confirms the red herring: `RSZ-0064` was emitted
+in this green run too.** Repair still "failed" to reach its margin, and the
+design still closed with 30 ps to spare. Three runs now — lib-v1.5 at
++1.53 ps, the submitted build at +41.45 ps, this one at +30.90 ps — have
+carried that warning while closing. It says nothing about whether the design
+holds.
+
+⚠️ **`clock__skew__worst_hold` is still -267 ps here**, so skew alone never
+determined the outcome either. It is a standing property of this design, not a
+regression, and it is what makes the design sensitive enough that a 12 ps
+constraint decides the result.
+
+⛔ **Nothing about the SUBMITTED artifact ever depended on this**: `harden/`
+builds a bare die that is never submitted (this is the same config B2
+mis-cited), and the shipped path was green throughout at +41.45 ps.
 
 ⚠️ **Underlying, recorded and NOT fixed:** `clock__skew__worst_hold` is
 **-259 ps** on this design. That is pre-existing, identical under lib-v1.5,
