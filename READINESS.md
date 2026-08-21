@@ -1047,6 +1047,29 @@ disagrees with the committed table beyond a stated tolerance, so it can never
 go stale again. Step 2 is the durable half; step 1 alone reproduces the
 situation that created M21.
 
+**MEASURED 2026-08-21, so this is drift and not bookkeeping.** The guard was
+run against the `GDS_logs` artifact of run **32412600538** (`main`, lib-v1.6 —
+i.e. the design as it ships today) and disagrees with every published headline
+cell:
+
+| ring | ff doc → fresh | tt doc → fresh | ss doc → fresh |
+|---|---|---|---|
+| INV | 731.8/468 → 732.0/468 | 620.6/397 → 620.8/397 | 457.8/293 → 458.0/293 |
+| NAND2 | 584.0/374 → **586.1/375** | 455.0/291 → **456.9/292** | 304.8/195 → **306.0/196** |
+| NOR2 | 361.9/232 → **359.0/230** | 291.9/187 → **289.5/185** | 207.4/133 → **205.5/132** |
+
+plus four RC-band counts. **NOR2 moved most** — 2.4 MHz and 2 counts at tt, and
+it is the slowest ring, the one whose absolute count is smallest and whose
+percentage error is therefore largest.
+
+⚖️ **Honest about the size**: the shifts are ≤0.8% and ≤2 counts, and the
+published RC bands are 5-6 counts wide, so no reading that agrees with the new
+table would disagree with the old one by more than a band. This is **not** a
+number that invalidates the instrument. It is a published prediction that does
+not match the design that will be fabricated, in a document whose whole purpose
+is to be compared against silicon — and the reason it drifted (nothing
+recomputes it) is what makes it worth fixing rather than patching.
+
 ⚠️ **Do not quote the current `docs/info.md` numbers as this chip's prediction
 until step 1 is done.**
 

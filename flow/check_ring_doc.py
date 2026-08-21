@@ -36,6 +36,14 @@ import sys
 from contextlib import redirect_stdout
 from pathlib import Path
 
+# This runs on a Windows dev box as well as in CI, where stdout defaults to
+# cp1252: any non-ASCII reporting character raises UnicodeEncodeError, so the
+# script would crash WHILE PRINTING its own finding -- doing the work and then
+# losing the answer, which is the one outcome a checker must never have.
+# Output is kept ASCII; this reconfigure is belt-and-braces for future edits.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ring_prediction
 
