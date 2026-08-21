@@ -59,7 +59,8 @@ understatement on the cell driving the slowest ring on this die.
 | L8 | User-facing text quotes one PVT although `lib.lock` pins three | ✅ **FIXED** — text corrected, and the stated *reason* was wrong (see M10) |
 | M10 | Corner-aware STA was not in effect (0.2% of arcs moved between PVT views) | ✅ **FIXED** — now **98.5%**, max delta 155% |
 | M19 | **No cell in the library declares a `min_pulse_width`**, so OpenSTA's min-pulse-width check has no requirement to apply and CANNOT FAIL — however narrow the clock pulse gets. It lands on the prescaler, which is clocked DIRECTLY by the ring | 🔧 **OPEN, in flight 2026-08-21** — measured in `stdcells` (lib-v1.7, characterizing), checked here by `flow/check_min_pulse_width.py`. See below |
-| M21 | **The published ring predictions in `docs/info.md` were computed on `lib-v1.4` and run `30934157150`, and nothing regenerates or checks them** | 🔴 **OPEN, NEW 2026-08-21** — that table is the number silicon gets judged against in 2027. See below |
+| M21 | **The published ring predictions in `docs/info.md` were computed on `lib-v1.4` and run `30934157150`, and nothing regenerates or checks them** | 🔴 **OPEN, NEW 2026-08-21** — that table is the number silicon gets judged against in 2027. Guard written (`flow/check_ring_doc.py`, both parsers tested); not yet wired, and the table not yet regenerated. See below |
+| — | The DFF constraints are "optimistic by an **unquantified** margin" against foundry practice (capture boundary vs degradation criterion) — standing since lib-v1.0, spanning setup, hold and `min_pulse_width` | ✅ **QUANTIFIED 2026-08-21** — at most **+4.7 ps**, and **+0.5 ps** at the corner where hold binds. Recorded, not closed by redefinition. See item 3 of "What is left" |
 
 ⛔ **THE OPEN LIST IS NOT EMPTY (corrected 2026-08-21).** The paragraph below
 was written on 2026-08-20, when it was true. **M19** was found the same evening
@@ -1078,14 +1079,34 @@ that mean less than they look.
 2. 🔴 **M21 — the published ring predictions are stale and unguarded.** See
    its section above. Regenerate against the lib-v1.7 run, then add the CI step
    that keeps them honest.
-3. ⚠️ **The criterion caveat, inherited from lib-v1.0 and now spanning three
-   constraints.** setup, hold and `min_pulse_width` are all measured at the
-   **capture boundary** — the metastability cliff — where a commercial library
-   reports the point at which clk→Q has degraded by a fixed fraction. Ours are
-   therefore **optimistic by an unquantified margin** against foundry practice.
-   It is written down in `characterize.py`'s `dff_constraints` docstring and it
-   is not a defect in any single number; it is a statement about what all of
-   them mean. Closing it is a change of CRITERION, not of shape.
+3. ✅ **The criterion caveat — MEASURED 2026-08-21, and it changes nothing.**
+   setup, hold and `min_pulse_width` are all measured at the **capture
+   boundary** (the metastability cliff) where a commercial library reports the
+   point at which clk→Q has degraded by a fixed fraction, so all three are
+   optimistic against foundry practice. That had stood as "an **unquantified**
+   margin" since lib-v1.0 — true, unfalsifiable as written, and load-bearing
+   for this decision. It is now a number. Re-running the same stimuli against a
+   10% clk→Q degradation target, **on our own cell** (which isolates the
+   criterion from the cell — comparing against the foundry's `dfxtp_1`
+   confounds the two, and that is what made a 3x gap look plausible):
+
+   | corner | setup rise | setup fall | hold rise | hold fall |
+   |---|---|---|---|---|
+   | tt | +1.8 ps | +4.6 ps | +1.2 ps | +4.7 ps |
+   | ff | +0.9 ps | +1.5 ps | **+0.5 ps** | +1.3 ps |
+
+   plus **1.05x** (50 ps clock slew) and **1.06x** (300 ps) on
+   `min_pulse_width`. The largest shift anywhere is **+4.7 ps**, in the
+   pessimistic direction. Against **+41.45 ps** of worst hold slack — at
+   `min_ff`, where the shift is **+0.5 ps** — and M6's **1.27x**, it moves no
+   conclusion in this file.
+   ⓘ Why it is so small: this flop fails abruptly, so clk→Q is still within 10%
+   of nominal a few ps from the cliff and the two criteria nearly coincide.
+   **That is a property of this topology, not a general result** — do not quote
+   it as a fact about flip-flops.
+   ⛔ **Recorded, not closed by a change of criterion**, deliberately: switching
+   would redefine three constraints across two repos to buy under 5 ps. Do not
+   re-open without a number that says otherwise.
 
 **What is no longer a reason to wait**: the badge, the connectivity signoff,
 the corner spread, the untimed ring domain, and both silent-corruption bugs
