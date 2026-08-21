@@ -152,6 +152,50 @@ jobs:
         if: success() || failure()
         run: python3 flow/check_ring_doc.py runs
 
+  # The ring read-out path, simulated on the netlist that actually ships.
+  #
+  # WHY THIS JOB EXISTS. TinyTapeout's own `gl_test` runs the netlist at ZERO
+  # delay, which turns a ring oscillator into a combinational loop, so every
+  # ring test skips itself there: at 19aef52 that job reported TESTS=8 PASS=3
+  # SKIP=5. The consequence was that on the artifact being fabricated, the only
+  # functionally verified behaviour was the sine engine and "a dark ring reads
+  # zero" -- the prescaler, the CDC synchronizer, the window accumulator, the
+  # count latch, the byte mux and the arm latch were all unverified post-route.
+  # test/run_gl_own.py exists precisely to close that (it back-annotates the
+  # post-P&R SDF so the rings really oscillate) and it was in NO workflow; its
+  # last recorded run was 2026-07-21, against a pre-H3 netlist that no longer
+  # exists. Measured locally on this artifact: 5/5 pass in 32 seconds.
+  #
+  # ⚠️ WHAT IT DOES AND DOES NOT PROVE. It proves the instrument WORKS on the
+  # routed netlist -- that the counter counts, the mux addresses the latched
+  # value, and selection is latched at arm. It does NOT validate the published
+  # silicon prediction: the simulation is annotated from the same SDF the raw
+  # prediction is summed from, so those two agree by construction. The
+  # corrected prediction in docs/info.md is a correction TO that SDF, and only
+  # the die can settle it.
+  gl_rings:
+    needs: gds
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      - name: Install iverilog
+        run: sudo apt-get update && sudo apt-get install -y iverilog
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - run: pip install -r test/requirements.txt
+      - name: Fetch the hardening run
+        uses: actions/download-artifact@v5
+        with:
+          name: GDS_logs
+          path: gdslogs
+      # No `if: failure()` escape and no `continue-on-error`: a ring read-out
+      # that cannot be simulated is a finding, not a warning.
+      - name: Rings count on the routed netlist (SDF back-annotated)
+        run: python3 test/run_gl_own.py gdslogs/runs
+
   precheck:
     needs: gds
     runs-on: ubuntu-24.04

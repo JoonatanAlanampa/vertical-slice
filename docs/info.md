@@ -62,8 +62,42 @@ delay of one cell, is:
 
 ```
 f_ring = count * 256 / (2**window / f_clk)
-tp     = 1 / (2 * 31 * f_ring)
+tp     = 1 / (2 * 31 * f_ring)      <- NAND2 and NOR2 rings ONLY
 ```
+
+`f_ring` is exact for all three rings. **`tp` is not.** It assumes 31
+identical stages, which is true of the NAND2 and NOR2 rings and **false of
+the INV ring**, which is 30 `INV_X1` + the enabling `NAND2_X1` (see the
+table above, and `src/ro_ring.sv` — an odd-stage ring needs its enable gate
+somewhere). Dividing that ring's period by 62 returns a 30:1 blend of the
+two cells, not `INV_X1`'s delay. De-blend it with the NAND2 ring, which
+measures that stage directly:
+
+```
+tp_INV = ( 1/f_INV - 1/(31 * f_NAND2) ) / 60
+```
+
+**Use it.** The blend is a one-signed bias of **+0.84 % (ff) / +1.21 % (tt) /
++1.68 % (ss)** — larger than the ±0.8 % RC band this page publishes below,
+larger than the 1.0-1.2 % loop-closure correction that was thought worth a
+paragraph, and it lands on the simplest cell, the one the device model
+predicts most directly. Everything needed to correct it was already on this
+page; the correction was not, until 2026-08-21.
+
+⚠️ The de-blend charges the INV ring's NAND2 stage at the delay it shows in
+the *NAND2* ring, where it drives a NAND2 rather than an inverter. The two
+input pins differ by 0.001 fF and the driving slew differs, worth ~0.3 % on
+that one stage — i.e. ~0.01 % on `tp_INV`, against the 1.2 % the de-blend
+removes. Exact enough; not exact.
+
+**What the cell delays should be** (same model and run as the count table
+below — this is the answer key for the three numbers the die returns):
+
+| corner | `tp_INV` | `tp_NAND2` | `tp_NOR2` |
+|---|---|---|---|
+| ff (-40 C, 1.95 V) | 21.85 ps | 27.52 ps | 44.93 ps |
+| tt (25 C, 1.80 V) | **25.67 ps** | **35.30 ps** | **55.71 ps** |
+| ss (100 C, 1.60 V) | 34.63 ps | 52.71 ps | 78.49 ps |
 
 Everything needed is on the die — no analog pins, no calibration, no
 instrument beyond a clock of known frequency.
@@ -159,7 +193,10 @@ not paranoia.
 wait past the window (164 us on the short setting), **then LOWER `ui[4]`
 and wait one more window before reading** the three count bytes through
 `ui[3:2]`. Repeat for `ui[1:0] = 10` and `11`. Three counts, three cell
-delays.
+delays — and remember the INV ring needs the de-blend above before its
+count becomes an `INV_X1` delay. Compare them against `own.lib`, against
+the DEVSIM device model, and against the OpenSTA signoff numbers — that
+comparison is the reason the chip exists.
 
 > **Drop RUN before you read — this is not optional.** `ui[4]` is a level,
 > so while it is high the FSM re-arms the moment it goes idle and a new
@@ -172,9 +209,7 @@ delays.
 > bytes, that is the normal case rather than the unlucky one. With RUN low
 > the last result stays latched and the read is atomic.
 > `bringup/vslice_bringup.py` already does this; earlier revisions of this
-> page did not say so. Compare them against `own.lib`, against the
-DEVSIM device model, and against the OpenSTA signoff numbers — that
-comparison is the reason the chip exists.
+> page did not say so.
 
 `ui[3:2] = 11` also puts the prescaled ring on `uo[6]` (`ring_alive`)
 while a measurement is running, so a scope or a frequency counter can

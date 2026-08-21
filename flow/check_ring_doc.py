@@ -30,6 +30,7 @@ the defect class this repo keeps finding, and M21 itself is an instance.
 """
 
 import argparse
+import ast
 import io
 import re
 import sys
@@ -128,6 +129,73 @@ def resolve_run(path: str) -> Path:
     return max(cands, key=lambda d: d.stat().st_mtime)
 
 
+# "| tt (25 C, 1.80 V) | **25.67 ps** | **35.30 ps** | **55.71 ps** |"
+DOC_TP = re.compile(r"^\|\s*(ff|tt|ss)\s*\([^)]*\)\s*\|(.+)\|\s*$", re.M)
+PS = re.compile(r"([\d.]+)\s*ps")
+
+BRINGUP = ROOT / "bringup" / "vslice_bringup.py"
+
+
+def doc_tp_table():
+    """-> {(pvt, ring): ps} from the published CELL-DELAY table.
+
+    Added 2026-08-21 together with the INV de-blend. It is a SECOND published
+    prediction in the same file, so it gets the same treatment as the first:
+    left unasserted it would have re-created M21 inside the fix for M21.
+    """
+    md = (ROOT / "docs" / "info.md").read_text(encoding="utf-8")
+    out = {}
+    for m in DOC_TP.finditer(md):
+        vals = PS.findall(m.group(2))
+        if len(vals) == len(RINGS):
+            for ring, v in zip(RINGS, vals):
+                out[(m.group(1), ring)] = float(v)
+    return out
+
+
+def bringup_constants():
+    """-> (PREDICTED_HZ, PREDICTED_BAND_HZ) parsed from the bring-up script.
+
+    THE FILE M21's FIRST FIX DID NOT REACH. This checker was written to stop
+    docs/info.md going stale and pointed only at docs/info.md, while the script
+    that actually runs on the demo board -- the one artifact a human touches in
+    2027 -- kept a two-library-generation-old prediction behind a comment
+    reading "Keep them in sync". A human instruction is the mechanism, not the
+    fix, and both review gates found it independently.
+
+    Parsed with `ast`, not imported: importing runs module-level code, and a
+    bring-up script is not something a CI check should execute.
+    """
+    tree = ast.parse(BRINGUP.read_text(encoding="utf-8"))
+    found = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            t = node.targets[0]
+            if isinstance(t, ast.Name) and t.id in ("PREDICTED_HZ",
+                                                    "PREDICTED_BAND_HZ"):
+                found[t.id] = ast.literal_eval(node.value)
+    missing = {"PREDICTED_HZ", "PREDICTED_BAND_HZ"} - set(found)
+    if missing:
+        sys.exit(f"ERROR: {BRINGUP.name} no longer defines {sorted(missing)} "
+                 f"at module level. This check must not silently stop covering "
+                 f"the file it was extended to cover.")
+    return found["PREDICTED_HZ"], found["PREDICTED_BAND_HZ"]
+
+
+def tp_from(got, pvt):
+    """Cell delays implied by the fresh nom-corner ring predictions, in ps.
+
+    The INV ring is 30 INV_X1 + 1 NAND2_X1 (an odd-stage ring needs its enable
+    gate somewhere), so its period is 2*(30*tp_INV + tp_NAND2) and dividing by
+    2*31 returns a 30:1 BLEND -- the defect this table exists to correct.
+    De-blend with the NAND2 ring, which measures that stage directly.
+    """
+    f = {r: got[("nom", pvt, r)][0] * 1e6 for r in RINGS}
+    return {"INV": (1 / f["INV"] - 1 / (31 * f["NAND2"])) / 60 * 1e12,
+            "NAND2": 1 / (2 * 31 * f["NAND2"]) * 1e12,
+            "NOR2": 1 / (2 * 31 * f["NOR2"]) * 1e12}
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("run")
@@ -135,6 +203,8 @@ def main() -> int:
                     help="MHz, absolute; the doc prints one decimal")
     ap.add_argument("--count-tol", type=int, default=1,
                     help="counts, absolute; the doc prints an integer")
+    ap.add_argument("--tp-tol", type=float, default=0.02,
+                    help="ps, absolute; the doc prints two decimals")
     args = ap.parse_args()
 
     run = resolve_run(args.run)
@@ -173,10 +243,40 @@ def main() -> int:
 
     # Name the RESOLVED run, not the argument: a log that says "runs" does not
     # tell the next reader which build the published table was checked against.
-    print(f"compared {len(main_t)} headline + {2 * len(band_t)} band numbers "
-          f"against a fresh computation on {run}")
+    tp_t = doc_tp_table()
+    if len(tp_t) != len(RINGS) * len(PVTS):
+        sys.exit(f"ERROR: parsed {len(tp_t)} cell-delay cells from "
+                 f"docs/info.md, expected {len(RINGS) * len(PVTS)}. The "
+                 f"published cell-delay table's shape changed.")
+    for pvt in PVTS:
+        fresh_tp = tp_from(got, pvt)
+        for ring in RINGS:
+            doc_ps = tp_t[(pvt, ring)]
+            if abs(fresh_tp[ring] - doc_ps) > args.tp_tol:
+                bad.append(f"  {pvt:>3s}/{ring:<6s} cell delay: doc "
+                           f"{doc_ps:6.2f} ps   fresh {fresh_tp[ring]:6.2f} ps")
+
+    pred_hz, band_hz = bringup_constants()
+    if set(pred_hz) != set(RINGS) or set(band_hz) != set(RINGS):
+        sys.exit(f"ERROR: the bring-up script's tables cover {sorted(pred_hz)} "
+                 f"/ {sorted(band_hz)}, expected {sorted(RINGS)} in both.")
+    for ring in RINGS:
+        want = got[("nom", "tt", ring)][0]
+        if abs(pred_hz[ring] / 1e6 - want) > args.mhz_tol:
+            bad.append(f"  bringup PREDICTED_HZ[{ring}]: script "
+                       f"{pred_hz[ring]/1e6:7.1f} MHz   fresh {want:7.1f} MHz")
+        lo_want, hi_want = got[("nom", "ss", ring)][0], got[("nom", "ff", ring)][0]
+        lo, hi = band_hz[ring][0] / 1e6, band_hz[ring][1] / 1e6
+        if abs(lo - lo_want) > args.mhz_tol or abs(hi - hi_want) > args.mhz_tol:
+            bad.append(f"  bringup PREDICTED_BAND_HZ[{ring}]: script "
+                       f"{lo:7.1f}..{hi:7.1f}   fresh "
+                       f"{lo_want:7.1f}..{hi_want:7.1f} MHz")
+
+    print(f"compared {len(main_t)} headline + {2 * len(band_t)} band + "
+          f"{len(tp_t)} cell-delay numbers against a fresh computation on "
+          f"{run}, plus {3 * len(RINGS)} constants in {BRINGUP.name}")
     if bad:
-        print("\nDOCS/INFO.MD DISAGREES WITH THE SHIPPED DESIGN — defect M21:")
+        print("\nPUBLISHED PREDICTIONS DISAGREE WITH THE SHIPPED DESIGN — defect M21:")
         print("\n".join(bad))
         print("\nRegenerate with `python flow/ring_prediction.py --run "
               "<run-dir>` and update docs/info.md, INCLUDING the run id and "

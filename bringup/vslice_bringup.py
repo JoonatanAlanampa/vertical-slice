@@ -37,7 +37,13 @@ measured anything.
 The demo-board API shim is lifted from tt-cordic/bringup/cordic1_bringup.py,
 where it was verified against tt-micropython-firmware v2.0.0 (commit f34d9f0,
 microcotb 81f2498). Constants come from src/ro_meas.sv and src/project.sv;
-predictions come from flow/ring_prediction.py. Keep them in sync.
+predictions come from flow/ring_prediction.py.
+
+PREDICTED_HZ and PREDICTED_BAND_HZ below are ASSERTED against a fresh
+computation by flow/check_ring_doc.py on every gds run. This used to say
+"Keep them in sync" -- a human instruction, which is exactly the mechanism
+defect M21 was: the numbers went stale by two library generations and
+nothing noticed, because nothing looked.
 """
 
 import time
@@ -90,13 +96,13 @@ ST_BUSY, ST_VALID = 0x01, 0x02
 # Before 2026-08-02 the table said 442.7 / 359.2 / 252.1 MHz, which was a
 # prediction of a DIFFERENT circuit: a stray BUF_X2 then hung off every ring
 # node (H3, fixed).
-PREDICTED_HZ = {"INV": 625.0e6, "NAND2": 459.1e6, "NOR2": 294.5e6}
+PREDICTED_HZ = {"INV": 620.8e6, "NAND2": 456.9e6, "NOR2": 289.5e6}
 
 # ff(-40C,1.95V) .. ss(100C,1.60V), same model. A part measured at room
 # temperature landing outside this is the interesting result, not an error.
-PREDICTED_BAND_HZ = {"INV": (464.8e6, 732.7e6),
-                     "NAND2": (308.7e6, 583.3e6),
-                     "NOR2": (212.1e6, 356.3e6)}
+PREDICTED_BAND_HZ = {"INV": (458.0e6, 732.0e6),
+                     "NAND2": (306.0e6, 586.1e6),
+                     "NOR2": (205.5e6, 359.0e6)}
 
 
 def ring_hz(count, clk_hz, win_bits):
@@ -105,7 +111,27 @@ def ring_hz(count, clk_hz, win_bits):
     return count * (1 << PRE) * clk_hz / (1 << win_bits)
 
 
-def stage_delay_s(f_ring):
+def stage_delay_s(f_ring, ring="NAND2", f_nand2=None):
+    """One cell's propagation delay from a ring frequency.
+
+    Exact for the NAND2 and NOR2 rings, which are homogeneous 31-stage
+    chains. NOT exact for the INV ring: an odd-stage ring needs its enable
+    gate somewhere, and here it is stage 0, so that ring is 30 INV_X1 + 1
+    NAND2_X1 (src/ro_ring.sv). Dividing its period by 2*STAGES returns a
+    30:1 BLEND of the two cells, biased +0.84 % (ff) / +1.21 % (tt) /
+    +1.68 % (ss) -- one-signed, and larger than the RC band the datasheet
+    publishes. De-blend it with the NAND2 ring, which measures that stage
+    directly:  tp_INV = (1/f_INV - 1/(31*f_NAND2)) / 60.
+
+    Returns None for INV when no NAND2 reading is available, rather than
+    silently handing back the blend: this number is the chip's output.
+    """
+    if not f_ring:
+        return None
+    if ring == "INV":
+        if not f_nand2:
+            return None
+        return (1.0 / f_ring - 1.0 / (STAGES * f_nand2)) / (2.0 * (STAGES - 1))
     return 1.0 / (2.0 * STAGES * f_ring)
 
 
@@ -381,20 +407,39 @@ def measure_rings(board=None, clk_hz=None):
     if clk_hz is None:
         clk_hz = check_heartbeat(board) or CLK_HZ
 
+    # MEASURE EVERYTHING BEFORE REPORTING ANYTHING. The INV ring's cell delay
+    # cannot be computed from the INV ring alone -- its enable stage is a
+    # NAND2, so de-blending needs the NAND2 reading (see stage_delay_s).
     out = {}
-    log("\n  %-7s %12s %12s %10s %12s" %
-        ("ring", "measured", "predicted", "ratio", "stage delay"))
     for ring in ORDER:
-        f = measure_ring(board, ring, clk_hz, long_window=True)
-        out[ring] = f
+        out[ring] = measure_ring(board, ring, clk_hz, long_window=True)
+
+    log("\n  %-7s %12s %12s %10s %12s  %s" %
+        ("ring", "measured", "predicted", "ratio", "stage delay", "band"))
+    for ring in ORDER:
+        f = out[ring]
         if not f:
             log("  %-7s %12s   %10.1f MHz" %
                 (ring, "DEAD" if f == 0.0 else "no reading",
                  PREDICTED_HZ[ring] / 1e6))
             continue
         pred = PREDICTED_HZ[ring]
-        log("  %-7s %9.1f MHz %9.1f MHz %10.3f %9.1f ps"
-            % (ring, f / 1e6, pred / 1e6, f / pred, stage_delay_s(f) * 1e12))
+        tp = stage_delay_s(f, ring, out.get("NAND2"))
+        lo, hi = PREDICTED_BAND_HZ[ring]
+        # THE VERDICT THAT WAS MISSING. PREDICTED_BAND_HZ was DEAD CODE -- its
+        # only mention anywhere in the repo was its own definition. The script
+        # printed a ratio against the tt point and never said whether the
+        # reading sits inside the ff..ss corner spread, which is the only
+        # judgement separating "the model is wrong" from "this part is cold".
+        band = "in band" if lo <= f <= hi else "OUTSIDE ff..ss  <-- the result"
+        log("  %-7s %9.1f MHz %9.1f MHz %10.3f %9s ps  %s"
+            % (ring, f / 1e6, pred / 1e6, f / pred,
+               "n/a" if tp is None else "%.1f" % (tp * 1e12), band))
+    if out.get("INV") and not out.get("NAND2"):
+        log("\n  NOTE: INV stage delay is 'n/a' because the NAND2 ring did not")
+        log("  read. The INV ring is 30 INV_X1 + 1 NAND2_X1, so its cell delay")
+        log("  needs the NAND2 ring to de-blend the enable stage. The blended")
+        log("  value would be ~1.2 %% high; it is withheld rather than shown.")
 
     live = [r for r in ORDER if out.get(r)]
     if len(live) == len(ORDER):
@@ -407,7 +452,9 @@ def measure_rings(board=None, clk_hz=None):
     log("  first number in this stack not produced by the same tools that")
     log("  produced the prediction. Ratios that differ BETWEEN flavors point")
     log("  at cell-level modelling; a common offset points at the process")
-    log("  corner or the supply (the library has a single characterized PVT).")
+    log("  corner or the supply. The library is characterized at THREE PVT")
+    log("  corners (lib-v1.1 onward), so PREDICTED_BAND_HZ above is the")
+    log("  model's own ff..ss spread rather than a guess.")
     return out
 
 
@@ -458,9 +505,10 @@ def main(clk_hz=CLK_HZ):
 def sweep_supply(voltages=(1.6, 1.7, 1.8, 1.9), ring="INV", clk_hz=CLK_HZ):
     """Ring frequency vs core supply, if the board can adjust it.
 
-    Our library has ONE characterized PVT, so a supply sweep is the cheapest
-    way to get a slope out of real silicon and put the single nominal point in
-    context. Skips itself cleanly if the firmware cannot set the voltage.
+    The library is characterized at three process/temperature corners
+    (lib-v1.1 onward), but voltage is not swept within a corner, so a supply
+    sweep is still the cheapest way to get a dV slope out of real silicon.
+    Skips itself cleanly if the firmware cannot set the voltage.
     """
     board = Board.open()
     board.select()

@@ -1087,6 +1087,100 @@ recomputes it) is what makes it worth fixing rather than patching.
 ⚠️ **Do not quote the current `docs/info.md` numbers as this chip's prediction
 until step 1 is done.**
 
+## M22-M25 — what two adversarial review gates found after the list went empty. **2026-08-21.**
+
+The open list was empty, `gds` + `precheck` + `gl_test` + `viewer` were green,
+and both gates were asked the payment question anyway. Verdict: **NO-GO**, on
+four findings. All four are now fixed. **Both gates independently found M24** —
+the strongest signal in the set.
+
+### M22 — the datasheet's headline formula is wrong for the INV ring
+`docs/info.md` published `tp = 1/(2*31*f_ring)`. Exact for the NAND2 and NOR2
+rings, which are homogeneous 31-stage chains. **False for the INV ring**, which
+is 30 `INV_X1` + the enabling `NAND2_X1` (`src/ro_ring.sv`) — an odd-stage ring
+needs its enable gate somewhere. Dividing that ring's period by 62 returns a
+**30:1 blend**, biased **+0.84 % (ff) / +1.21 % (tt) / +1.68 % (ss)**,
+one-signed, on the simplest cell — the one the device model predicts most
+directly and on which the physics→silicon claim rests.
+
+For scale, this is larger than every effect this project has judged worth
+fixing: the loop-closure tap correction was 1.0-1.2 %, M21's drift 0.03-1.7 %,
+the published RC band ±0.8 %. **The page contained every fact needed to correct
+it and did not.** `bringup/vslice_bringup.py::stage_delay_s()` had the same
+defect, printing the blend as "stage delay" on the bench.
+
+Fixed: the de-blend `tp_INV = (1/f_INV - 1/(31*f_NAND2))/60` is published with
+its size and its own residual (~0.01 %, from charging that stage at the NAND2
+ring's slew), a per-corner **cell-delay answer key** is published beside it, and
+`stage_delay_s()` now returns **None rather than the blend** when no NAND2
+reading is available. Asserted by `check_ring_doc.py`.
+
+### M23 — the ring read-out had never been simulated on the netlist that ships
+TT's own `gl_test` runs the netlist at **zero delay**, which turns a ring into a
+combinational loop, so every ring test skipped: **TESTS=8 PASS=3 SKIP=5** at
+`19aef52`. On the artifact being fabricated the only functionally verified
+behaviour was the sine engine and "a dark ring reads zero" — the prescaler, the
+CDC synchronizer, the window accumulator, the count latch, the byte mux and the
+arm latch were all unverified post-route.
+
+`test/run_gl_own.py` exists precisely to close this and **was in no workflow**;
+its last recorded run was 2026-07-21 against a pre-H3 netlist. Run on this
+artifact it passes **5/5 in ~30 s** — INV 436, NAND2 305, NOR2 193 counts,
+correctly ordered. Now a `gl_rings` CI job.
+⚠️ **It does not validate the published prediction and must not be quoted as
+if it did**: the simulation is annotated from the same SDF the raw prediction
+is summed from, so those two agree by construction. The corrected prediction is
+a correction *to* that SDF. Only the die settles that.
+
+### M24 — M21's guard did not reach the file that runs on the demo board
+`bringup/vslice_bringup.py` carried `PREDICTED_HZ = {625.0, 459.1, 294.5}` MHz —
+**two library generations stale** (620.8 / 456.9 / 289.5 shipped), worst error
++1.73 % on NOR2. `PREDICTED_BAND_HZ` was **dead code**: its only mention in the
+repo was its own definition, so the script printed a ratio and never said
+whether a reading was **in band** — the only judgement separating "the model is
+wrong" from "this part is cold".
+
+The mechanism was a comment reading *"Keep them in sync"*. M21 was fixed the
+same morning by regenerating `docs/info.md` and pointing a guard at
+`docs/info.md`; the sibling file kept a human instruction. **A one-test-per-fix
+pattern, caught within hours by both gates.**
+
+Fixed: constants regenerated, the band verdict is live, and `check_ring_doc.py`
+now parses this file with `ast` (not import — a CI check should not execute a
+bring-up script) and asserts all nine constants. Coverage went **27 → 45
+numbers**. Also removed two L8 leftovers still claiming the library has a single
+characterized PVT, which `READINESS.md` had recorded as fixed and which were not.
+
+### M25 — a broken blockquote in the permanent datasheet
+Two lines of `docs/info.md` lost their `>`, so the torn-read warning ended
+mid-sentence on *"Compare them against `own.lib`, against the"* and the
+remainder became an orphan paragraph whose "them" had no antecedent twelve
+lines away. This is the file TinyTapeout renders into the shuttle datasheet.
+Fixed by returning the sentence to the paragraph it belongs to.
+
+### Accepted knowingly, recorded rather than fixed
+- **The library is characterized PRE-LAYOUT.** `stdcells/flow/cells.py::spice()`
+  emits `.subckt` + MOSFETs + `.ends` — no intra-cell RC anywhere. Silicon will
+  read **slower** than predicted by an unquantified, one-signed amount.
+- **The prediction is read below its own slew grid.** `ring_prediction.interp()`
+  clamps below `index_1[0] = 20 ps`; the INV ring's fixed-point slew lands at
+  **14.1 ps (tt)**. Using the table's own slope instead moves the headline ring
+  **+5.09 % (tt) / +7.89 % (ff)** — roughly 4x the published RC band, one-signed.
+  ⚠️ Note the two halves of the same signoff use **opposite** out-of-range
+  policies: OpenSTA extrapolates (measured), `ring_prediction` clamps.
+- **No independent ring observer.** `uo[6]`/`ring_alive` is post-prescaler and
+  post-synchronizer, so it is independent of the accumulator and the FSM but
+  **not** of the two blocks whose failure would silently corrupt the number.
+- **The experiment publishes the least discriminating quantity.** Absolute
+  readings span 44 % ff..ss; the flavour RATIOS span 8.9 % and are nearly
+  P/V/T-immune. There is no on-chip supply or temperature sensor.
+
+⇒ These four are why "the signoff is ready" and "the experiment is ready" are
+different sentences. None blocks fabrication; together they mean the number
+comes back with a wider and less attributable error bar than the ±0.8 % band on
+the page suggests. **Closing them is measurement work in `stdcells`, not a
+re-harden.**
+
 ## What is left, in order
 
 `gds` is green, so nothing below blocks the *mechanics* of submitting. These
