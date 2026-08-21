@@ -76,14 +76,16 @@ low-pass (1 kOhm + 100 nF) or the TT Audio Pmod. Sweep `ui[6:0]` to walk
 the frequency table; `uo[6]` gives the scope a trigger.
 
 **What the counts should be.** Our own timing model predicts, per PVT
-corner (short window, 25 MHz clock, run `30934157150`, `lib-v1.4`;
-regenerate with `python flow/ring_prediction.py --run <run-dir>`):
+corner (short window, 25 MHz clock, run `32481579140`, `lib-v1.7`;
+regenerate with `python flow/ring_prediction.py --run <run-dir>`, and
+`flow/check_ring_doc.py` asserts on every CI run that this table still
+matches the design being built):
 
 | ring | ff (-40 C, 1.95 V) | tt (25 C, 1.80 V) | ss (100 C, 1.60 V) |
 |---|---|---|---|
-| INV | 731.8 MHz / 468 | **620.6 MHz / 397** | 457.8 MHz / 293 |
-| NAND2 | 584.0 MHz / 374 | **455.0 MHz / 291** | 304.8 MHz / 195 |
-| NOR2 | 361.9 MHz / 232 | **291.9 MHz / 187** | 207.4 MHz / 133 |
+| INV | 732.0 MHz / 468 | **620.8 MHz / 397** | 458.0 MHz / 293 |
+| NAND2 | 586.1 MHz / 375 | **456.9 MHz / 292** | 306.0 MHz / 196 |
+| NOR2 | 359.0 MHz / 230 | **289.5 MHz / 185** | 205.5 MHz / 132 |
 
 Multiply by 256 for the long window. A silicon reading that disagrees is
 not a bug to be fixed — it is the result this chip exists to produce, and
@@ -95,9 +97,9 @@ RC brackets it (counts per short window):
 
 | ring | ff min..max | tt min..max | ss min..max |
 |---|---|---|---|
-| INV | 471 .. 465 | 400 .. 394 | 295 .. 290 |
-| NAND2 | 378 .. 369 | 295 .. 287 | 198 .. 192 |
-| NOR2 | 234 .. 228 | 189 .. 184 | 135 .. 130 |
+| INV | 471 .. 466 | 400 .. 395 | 296 .. 291 |
+| NAND2 | 379 .. 371 | 296 .. 288 | 199 .. 193 |
+| NOR2 | 233 .. 226 | 188 .. 182 | 133 .. 129 |
 
 So a reading anywhere inside its PVT column's band is consistent with the
 model; only a miss outside all three bands is a real disagreement.

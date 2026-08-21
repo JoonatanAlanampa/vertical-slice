@@ -58,8 +58,8 @@ understatement on the cell driving the slowest ring on this die.
 | M12 | 58 max-slew violations at ss, hidden by M11's clamped-to-zero slews | ✅ **CLOSED 2026-08-04** — repair could not see them (one estimated-parasitic view, no RC corners yet); fixed with repair margin, not a looser limit |
 | L8 | User-facing text quotes one PVT although `lib.lock` pins three | ✅ **FIXED** — text corrected, and the stated *reason* was wrong (see M10) |
 | M10 | Corner-aware STA was not in effect (0.2% of arcs moved between PVT views) | ✅ **FIXED** — now **98.5%**, max delta 155% |
-| M19 | **No cell in the library declares a `min_pulse_width`**, so OpenSTA's min-pulse-width check has no requirement to apply and CANNOT FAIL — however narrow the clock pulse gets. It lands on the prescaler, which is clocked DIRECTLY by the ring | 🔧 **OPEN, in flight 2026-08-21** — measured in `stdcells` (lib-v1.7, characterizing), checked here by `flow/check_min_pulse_width.py`. See below |
-| M21 | **The published ring predictions in `docs/info.md` were computed on `lib-v1.4` and run `30934157150`, and nothing regenerates or checks them** | 🔴 **OPEN, NEW 2026-08-21** — that table is the number silicon gets judged against in 2027. Guard written (`flow/check_ring_doc.py`, both parsers tested); not yet wired, and the table not yet regenerated. See below |
+| M19 | **No cell in the library declares a `min_pulse_width`**, so OpenSTA's min-pulse-width check has no requirement to apply and CANNOT FAIL — however narrow the clock pulse gets. It lands on the prescaler, which is clocked DIRECTLY by the ring | ✅ **CLOSED 2026-08-21** — measured in `stdcells` **lib-v1.7** and re-pinned here; `gds` green with the check passing at all nine corners, binding margin **+577.9 ps**, positive control firing. See below |
+| M21 | **The published ring predictions in `docs/info.md` were computed on `lib-v1.4` and run `30934157150`, and nothing regenerates or checks them** | ✅ **CLOSED 2026-08-21** — regenerated against run `32481579140` (lib-v1.7) and now asserted on every `gds` run by `flow/check_ring_doc.py`. The wiring is the half that matters. See below |
 | — | The DFF constraints are "optimistic by an **unquantified** margin" against foundry practice (capture boundary vs degradation criterion) — standing since lib-v1.0, spanning setup, hold and `min_pulse_width` | ✅ **QUANTIFIED 2026-08-21** — at most **+4.7 ps**, and **+0.5 ps** at the corner where hold binds. Recorded, not closed by redefinition. See item 3 of "What is left" |
 
 ⛔ **THE OPEN LIST IS NOT EMPTY (corrected 2026-08-21).** The paragraph below
@@ -1040,12 +1040,19 @@ last regenerated at `5ded3aa`. A number nobody recomputes is a number that
 drifts silently, which is this project's signature defect wearing yet another
 hat.
 
-**The fix, in order.** (1) Re-run `python flow/ring_prediction.py --run
-<run-dir>` against the lib-v1.7 `gds` artifact and update `docs/info.md`.
-(2) Add a `gds.yaml` step that regenerates the prediction and FAILS if it
-disagrees with the committed table beyond a stated tolerance, so it can never
-go stale again. Step 2 is the durable half; step 1 alone reproduces the
-situation that created M21.
+✅ **BOTH HALVES DONE 2026-08-21.** (1) `docs/info.md` is regenerated against
+run **`32481579140`** on **`lib-v1.7`**, both tables and the provenance
+sentence. (2) `flow/check_ring_doc.py` is wired into `gds.yaml` and now
+asserts, on every run, that the published table still matches the design being
+built — comparing both tables, failing loudly if either side parses to
+anything other than 9 cells, and resolving the run directory rather than
+spelling its name. **The wiring is the half that mattered**; regenerating
+alone would just have reset the clock on the same drift.
+
+ⓘ **A useful invariant fell out of it**: the lib-v1.7 prediction is
+byte-identical to the lib-v1.6 one, which is independent confirmation that
+adding a `min_pulse_width` constraint changed no routing — as it should not,
+since it touches no delay table.
 
 **MEASURED 2026-08-21, so this is drift and not bookkeeping.** The guard was
 run against the `GDS_logs` artifact of run **32412600538** (`main`, lib-v1.6 —
@@ -1086,10 +1093,12 @@ table since `5ded3aa`. The findings table above had been kept current and this
 list had not. That is worth noticing in a file whose whole subject is numbers
 that mean less than they look.
 
-1. 🔧 **M19 — `min_pulse_width`.** The library declares none, so the
-   min-pulse-width check cannot fail, and it lands on the prescaler flop that
-   is clocked directly by the ring. In flight: measured in `stdcells`
-   (lib-v1.7), checked here by `flow/check_min_pulse_width.py`.
+1. ✅ **M19 — `min_pulse_width`. CLOSED 2026-08-21.** Measured in `stdcells`
+   **lib-v1.7** (`harden` green, tagged), re-pinned here, and checked on every
+   `gds` run by `flow/check_min_pulse_width.py` — nine corners at nine ring
+   periods, requirements read at the propagated clock slew, binding margin
+   **+577.9 ps** at `max_ff`, and a positive control that flags 16 ring pins
+   when the requirement is inflated to 9 ns.
    ✅ **The associated WORRY is answered and should not be re-raised:**
    min-pulse-width is **not** the binding limit on the instrument. Measured
    2026-08-21 by running `flow/check_min_pulse_width.py` against the real
@@ -1110,9 +1119,7 @@ that mean less than they look.
    FOUNDRY `dfxtp_1`; do not re-quote it. And the capture-boundary caveat that
    could have undermined this is measured at **1.05–1.06x** (item 3), not the
    3x once hypothesised.
-2. 🔴 **M21 — the published ring predictions are stale and unguarded.** See
-   its section above. Regenerate against the lib-v1.7 run, then add the CI step
-   that keeps them honest.
+2. ✅ **M21 — CLOSED 2026-08-21.** Regenerated and now asserted every run.
 3. ✅ **The criterion caveat — MEASURED 2026-08-21, and it changes nothing.**
    setup, hold and `min_pulse_width` are all measured at the **capture
    boundary** (the metastability cliff) where a commercial library reports the

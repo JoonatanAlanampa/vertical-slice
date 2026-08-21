@@ -107,6 +107,27 @@ def doc_tables():
     return main, band
 
 
+def resolve_run(path: str) -> Path:
+    """Accept either a run directory or the `runs/` parent holding one.
+
+    The step in gds.yaml passes `runs`, because the run's directory NAME is the
+    flow's business, not ours -- every other check in that workflow globs for
+    it rather than spelling it, and hardcoding `runs/wokwi` would break
+    silently the day the name changes. Fails loudly when nothing matches: this
+    asserts a property of a BUILT design and must not pass when there is none.
+    """
+    p = Path(path)
+    if (p / "final" / "sdf").is_dir():
+        return p
+    cands = [d for d in p.iterdir()
+             if d.is_dir() and (d / "final" / "sdf").is_dir()] if p.is_dir() else []
+    if not cands:
+        sys.exit(f"ERROR: no run with final/sdf under '{path}'. This check "
+                 f"asserts that a published table matches a BUILT design; "
+                 f"there is no design here to match it against.")
+    return max(cands, key=lambda d: d.stat().st_mtime)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("run")
@@ -116,7 +137,8 @@ def main() -> int:
                     help="counts, absolute; the doc prints an integer")
     args = ap.parse_args()
 
-    got, raw = computed(args.run)
+    run = resolve_run(args.run)
+    got, raw = computed(str(run))
     main_t, band_t = doc_tables()
     if len(main_t) != len(RINGS) * len(PVTS):
         sys.exit(f"ERROR: parsed {len(main_t)} headline cells from "
@@ -149,8 +171,10 @@ def main() -> int:
                 bad.append(f"  {pvt:>3s}/{ring:<6s} {rc} band: doc {want:4d}"
                            f"   fresh {got[key][1]:4d}")
 
+    # Name the RESOLVED run, not the argument: a log that says "runs" does not
+    # tell the next reader which build the published table was checked against.
     print(f"compared {len(main_t)} headline + {2 * len(band_t)} band numbers "
-          f"against a fresh computation on {args.run}")
+          f"against a fresh computation on {run}")
     if bad:
         print("\nDOCS/INFO.MD DISAGREES WITH THE SHIPPED DESIGN — defect M21:")
         print("\n".join(bad))
