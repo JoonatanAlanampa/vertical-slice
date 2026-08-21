@@ -1090,15 +1090,26 @@ that mean less than they look.
    min-pulse-width check cannot fail, and it lands on the prescaler flop that
    is clocked directly by the ring. In flight: measured in `stdcells`
    (lib-v1.7), checked here by `flow/check_min_pulse_width.py`.
-   ✅ **The associated WORRY is already answered and should not be re-raised:**
-   min-pulse-width is **not** the binding limit on the instrument. Headroom —
-   how much faster the ring may run before the constraint binds, the ratio
-   framing M6 is quoted in — is **7.21x (ff) / 5.30x (tt) / 3.87x (ss)**
-   against the counter's **1.53 / 1.39 / 1.27x**. The counter binds at every
-   corner. ⚠️ Those use a **capture-boundary** requirement; under a flat 3x
-   pessimism for a foundry-style degradation criterion ss becomes **1.29x**
-   against the counter's 1.27x — a tie, which is why that factor is being
-   measured rather than assumed.
+   ✅ **The associated WORRY is answered and should not be re-raised:**
+   min-pulse-width is **not** the binding limit on the instrument. Measured
+   2026-08-21 by running `flow/check_min_pulse_width.py` against the real
+   routed design (run `32412600538`) with the lib-v1.7 liberties — so these are
+   OpenSTA's own numbers at the propagated clock slew, not an estimate:
+
+   | corner | pulse available | worst requirement | headroom | M6 counter |
+   |---|---|---|---|---|
+   | ff | 679.0 ps | 101.1 ps | **6.72x** | 1.53x |
+   | tt | 800.5 ps | 142.9 ps | **5.60x** | 1.39x |
+   | ss | 1083.0 ps | 222.4 ps | **4.87x** | **1.27x** |
+
+   The counter binds at every corner, by a factor of 3.8–4.4. The worst check
+   on the die is `_4879_/CLK` — the prescaler flop clocked directly by the
+   ring, i.e. exactly the pin this defect is about — and the binding margin is
+   **+577.9 ps** at `max_ff`.
+   ⚠️ The **1.9x** that prompted the original worry came from extrapolating the
+   FOUNDRY `dfxtp_1`; do not re-quote it. And the capture-boundary caveat that
+   could have undermined this is measured at **1.05–1.06x** (item 3), not the
+   3x once hypothesised.
 2. 🔴 **M21 — the published ring predictions are stale and unguarded.** See
    its section above. Regenerate against the lib-v1.7 run, then add the CI step
    that keeps them honest.
