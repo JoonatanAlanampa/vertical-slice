@@ -246,7 +246,24 @@
 
   "//": "85 is the measured working density for these cells; the TT template",
   "//": "default of 72 was tuned for hd. Raise if GPL-0302 appears.",
-  "PL_TARGET_DENSITY_PCT": 85,
+
+  "//": "M30, lib-v2.0: 85 -> 65. 85 tells global placement it may pack a bin to",
+  "//": "85% FULL, and this die is only 43.5% utilised (IFP-0104) -- so the placer",
+  "//": "was free to clump the design into part of the core and leave the free",
+  "//": "area somewhere else entirely. That is fine until something has to be",
+  "//": "inserted LOCALLY. When hold repair does that, detailed placement has to",
+  "//": "shuffle neighbours to open a site, cannot, and quits: [DPL-0036].",
+  "//": "The evidence that it is legalization and not repair VOLUME: trimming the",
+  "//": "hold margin 0.030 -> 0.020 moved the unplaceable count only 599 -> 584,",
+  "//": "and the instances it names are ordinary logic and even ro stage cells",
+  "//": "(316 distinct), not the newly inserted buffers. The cells that cannot be",
+  "//": "placed are the ones already there.",
+  "//": "65 stays comfortably above the 43.5% the design actually occupies, which",
+  "//": "is the floor that matters -- asking for a density BELOW utilisation is",
+  "//": "what provokes the GPL-0302 the note above warns about.",
+  "//": "This spends no timing safety whatsoever: it changes where cells sit, not",
+  "//": "what the optimizer aims at.",
+  "PL_TARGET_DENSITY_PCT": 65,
 
   "//": "=================== TT TEMPLATE SETTINGS ===================",
 
