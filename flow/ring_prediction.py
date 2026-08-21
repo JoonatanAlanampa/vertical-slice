@@ -185,13 +185,40 @@ def parse_liberty(path):
     return cells
 
 
+# Set by interp() whenever a lookup lands below the table's first slew row,
+# so silicon() can refuse to publish a number computed at the grid edge.
+# See the M27 note on interp().
+SUBGRID = []
+
+
 def interp(tab, slew, load):
     """Bilinear on (input slew, output load). Clamped at the grid edges:
-    this model refuses to extrapolate, which is the whole point of bias 3."""
+    this model refuses to extrapolate, which is the whole point of bias 3.
+
+    ⚠️ CLAMPING IS NOT FREE, AND IT WAS NOT BEING COUNTED (M27). Refusing to
+    extrapolate is the right policy, but a clamp still RETURNS A NUMBER --
+    the value at the grid edge, presented with the same confidence as an
+    interpolated one. The ring's own fixed-point slew had slid to 14.1 ps at
+    tt and 11.5 ps at ff against a first row of 20 ps, so the headline
+    prediction was the 20 ps value for a stage running at 14. Using the
+    table's own 20->50 slope instead moved the INV ring +5.09 % at tt and
+    +7.89 % at ff -- against a published band of +/-0.8 %, one-signed, on the
+    headline number.
+
+    Note also that OpenSTA EXTRAPOLATES below index_1[0] rather than clamping
+    (measured against 2.7.0 while closing M19), so the two halves of the same
+    signoff had opposite out-of-range policies on the same tables.
+
+    The fix is a measured 10 ps row in stdcells lib-v2.0, not a change of
+    policy here. This records sub-grid lookups so silicon() can fail rather
+    than quietly publish one.
+    """
     i1, i2, rows = tab
 
     def axis(idx, v):
         if v <= idx[0]:
+            if v < idx[0]:
+                SUBGRID.append((v, idx[0]))
             return 0, 0.0
         for k in range(len(idx) - 1):
             if v <= idx[k + 1]:
@@ -357,6 +384,7 @@ def report(sdf_path):
 
 def silicon(run_dir):
     """The corrected prediction, per corner, with its error bar."""
+    SUBGRID.clear()
     run = Path(run_dir)
     sdfs = sorted((run / "final" / "sdf").glob("*/*.sdf"))
     if not sdfs:
@@ -449,6 +477,25 @@ def silicon(run_dir):
               + "  ".join(f"{c} {r*1000:.1f}/{f*1000:.1f}"
                           for c, (r, f) in sorted(slews.items()))
               + f"   [grid starts at {i1[0]*1000:.0f} ps]")
+
+    # M27. A clamp RETURNS the grid-edge value with the same confidence as an
+    # interpolated one, so a prediction computed there is not the prediction it
+    # claims to be. lib-v2.0 measures a 10 ps row precisely so the ring's own
+    # fixed point is interior; if a future ring slides under it again, this
+    # says so instead of quietly publishing the edge.
+    if SUBGRID:
+        worst = min(v for v, _ in SUBGRID)
+        floor = SUBGRID[0][1]
+        sys.exit(
+            f"\nREFUSING TO PUBLISH: {len(SUBGRID)} lookup(s) fell BELOW "
+            f"the library's first slew row ({floor*1000:.1f} ps); the fastest "
+            f"was {worst*1000:.1f} ps. interp() clamps rather than "
+            f"extrapolates, so those stages were evaluated at the GRID EDGE "
+            f"and the number above is not a prediction for this ring -- it is "
+            f"the prediction for a ring {floor/worst:.2f}x slower at that "
+            f"node. Measure a lower slew row in stdcells (SLEWS in "
+            f"flow/characterize.py) rather than relaxing this check. That is "
+            f"what M27 was.")
 
     print("\nColumns, each adding one correction to the one before it:\n"
           "  raw SDF          what the SDF says, and what a GL sim of that "
