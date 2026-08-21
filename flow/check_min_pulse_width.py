@@ -19,6 +19,20 @@ narrow, the counter does not count, and the number this whole chip exists to
 measure is wrong in a way no other check would notice: not zero, not obviously
 broken, just wrong.
 
+ⓘ TWO OpenSTA BEHAVIOURS THIS RELIES ON, both probed against 2.7.0 rather than
+assumed, because guessing either one wrong makes the check quietly wrong:
+  * `report_check_types -min_pulse_width` WITHOUT `-violators` prints exactly
+    one row — the worst check — and prints it whether it reads (MET) or
+    (VIOLATED). With `-violators` it prints every violating pin, so it can be
+    the LONGER of the two.
+  * It EXTRAPOLATES below index_1[0] rather than clamping. A table with fall
+    entries 0.09450 / 0.10060 at slews 0.020 / 0.050 returned 0.09043 under an
+    ideal clock — the linear extrapolation to slew 0, to five digits.
+  * The same probe confirmed the CONVENTION the characterizer asserts:
+    rise_constraint is the HIGH phase, fall_constraint the LOW one. A narrow
+    high phase was checked against the rise table's extrapolation (0.07970) and
+    a wide one reported the low phase against the fall table's (0.09043).
+
 ⚠️ TWO WAYS THIS CHECK WAS SILENTLY OPTIMISTIC, both fixed 2026-08-21 and both
 the same shape as the defects this repo keeps finding — a check that runs, says
 nothing, and is believed:
@@ -250,6 +264,16 @@ def main() -> int:
             period = ring_period(log, corner)
             checked += 1
 
+            # ⓘ MEASURED against OpenSTA 2.7.0, not assumed. The UNFILTERED
+            # report prints exactly ONE row -- the worst min-pulse-width check
+            # on the design -- and prints it whether it reads (MET) or
+            # (VIOLATED). The `-violators` report prints every violating pin,
+            # so it can be LONGER than the unfiltered one. That is the opposite
+            # of the obvious guess, and it is load-bearing twice over: the
+            # single unfiltered row is exactly the binding margin we want to
+            # report, and because it is present even when nothing violates, the
+            # "no rows at all" branch below is a real error rather than the
+            # normal passing case.
             all_sec = log[log.find("@@@ALL"):log.find("@@@VIOLATORS")]
             vio_sec = log[log.find("@@@VIOLATORS"):]
             all_rows = ROW.findall(all_sec)
@@ -266,12 +290,23 @@ def main() -> int:
             # rather than trust the line is still there.
             if not all_rows:
                 sys.exit(f"ERROR: {corner}: the unfiltered min-pulse-width "
-                         f"report listed NO checks at all. With ro_clk "
-                         f"constrained there are flops in that domain, so an "
-                         f"empty report means the check is not running.")
+                         f"report listed NO checks at all. It prints the worst "
+                         f"check even when that check passes, so with ro_clk "
+                         f"constrained and flops in that domain, empty means "
+                         f"the check is not running.")
+            # ⓘ ALSO MEASURED: OpenSTA EXTRAPOLATES below index_1[0] rather
+            # than clamping there. Probed with a spliced-in table whose first
+            # two fall entries are 0.09450 / 0.10060 at 0.020 / 0.050 ns; an
+            # ideal clock produced a required width of 0.09043, which is the
+            # linear extrapolation to slew 0 to five digits, not the 0.09450 a
+            # clamp would give. So zero_slew_floor's extrapolation is the right
+            # model of the value to refuse, not a conservative stand-in.
             floor_hi, floor_lo = zero_slew_floor(
                 (work / f"own_hardening_{pvt}.lib").read_text())
             worst_req = max(float(r[2]) for r in all_rows)
+            # The worst row may be either phase, so compare against the LARGER
+            # of the two floors: an ideal clock cannot produce a requirement
+            # above it, whichever phase happens to bind.
             floor = max(floor_hi, floor_lo)
             if worst_req <= floor * 1.02:
                 sys.exit(
@@ -286,9 +321,9 @@ def main() -> int:
             m_slack, m_pin, m_phase = min(slacks)
             margins.append((corner, m_slack, m_pin, m_phase, worst_req))
             print(f"  {corner}: ro_clk {period:.3f} ns "
-                  f"({period/2*1000:.1f} ps per phase), {len(all_rows)} check(s), "
-                  f"worst margin {m_slack*1000:+.1f} ps at {m_pin} ({m_phase}), "
-                  f"{len(rows)} violation(s)")
+                  f"({period/2*1000:.1f} ps per phase), worst check {m_pin} "
+                  f"({m_phase}) needs {worst_req*1000:.1f} ps and has "
+                  f"{m_slack*1000:+.1f} ps of margin, {len(rows)} violation(s)")
 
     # ------------------------------------------------------------------
     # POSITIVE CONTROL. "0 violations" is the exact shape of a check that is
