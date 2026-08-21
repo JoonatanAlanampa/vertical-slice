@@ -1,15 +1,15 @@
 {
   "repo": "JoonatanAlanampa/stdcells",
-  "tag": "lib-v1.7",
+  "tag": "lib-v2.0",
   "files": {
     "flow/heal_hvtp.py": "3f07eef0954cb1b199eebf43c8d4c513c2a105beeea9637192872693e37df054",
     "out/own.lef": "3818f94b849817f4f320105627864dbc7ee30f7a9e1b43c8a2496488fa8cb536",
-    "out/own.lib": "89342a3cf484cb0863fcdd0a38cbce701d5adcb9e8cadb93273a835655a13a06",
-    "out/own_abc.lib": "7b40a17c28538bd8f7df7113c51a1ae6c23fec111dd273c96d7fed21b5ff8375",
+    "out/own.lib": "2b8fb777243d063737ca3873718285d374e6e0baaca313efe30204375e70c0c6",
+    "out/own_abc.lib": "541b802d93544c76a29d195781a835fa23393af751d9cb359cd56d35520593fd",
     "out/own_cells.gds": "f771fe4d6553e57fb583344459671d47df3cae8c744d78aa30b29dac4db02de1",
-    "out/own_hardening.lib": "438d8dc9922eeaacf923499dbf3fc02be3645072df3063b887cce0300d038a3f",
-    "out/own_hardening_ff_n40C_1v95.lib": "034890f6971da04d2578047d512558db181f88ba421a0dc6d6f0993871709801",
-    "out/own_hardening_ss_100C_1v60.lib": "0f9e675255e8a5b6d1b9d026676332058cba30f8041b86d010967c3ce222ce94",
-    "out/own_hardening_tt_025C_1v80.lib": "438d8dc9922eeaacf923499dbf3fc02be3645072df3063b887cce0300d038a3f"
+    "out/own_hardening.lib": "d0cf661ab699d05ce64077512f0ab2538378458b853dc2ad71f10a28ba1a8984",
+    "out/own_hardening_ff_n40C_1v95.lib": "0831545d9149db56970e3b9fe169e683437661845df0d8d5f0626fd5d89868d3",
+    "out/own_hardening_ss_100C_1v60.lib": "65935c0843db2219ec043beaffb885c6bae913aac8392c9c723c07a11997bc85",
+    "out/own_hardening_tt_025C_1v80.lib": "d0cf661ab699d05ce64077512f0ab2538378458b853dc2ad71f10a28ba1a8984"
   }
 }
