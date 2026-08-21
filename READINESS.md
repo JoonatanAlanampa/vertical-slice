@@ -62,10 +62,17 @@ understatement on the cell driving the slowest ring on this die.
 | M21 | **The published ring predictions in `docs/info.md` were computed on `lib-v1.4` and run `30934157150`, and nothing regenerates or checks them** | ✅ **CLOSED 2026-08-21** — regenerated against run `32481579140` (lib-v1.7) and now asserted on every `gds` run by `flow/check_ring_doc.py`. The wiring is the half that matters. See below |
 | — | The DFF constraints are "optimistic by an **unquantified** margin" against foundry practice (capture boundary vs degradation criterion) — standing since lib-v1.0, spanning setup, hold and `min_pulse_width` | ✅ **QUANTIFIED 2026-08-21** — at most **+4.7 ps**, and **+0.5 ps** at the corner where hold binds. Recorded, not closed by redefinition. See item 3 of "What is left" |
 
-⛔ **THE OPEN LIST IS NOT EMPTY (corrected 2026-08-21).** The paragraph below
-was written on 2026-08-20, when it was true. **M19** was found the same evening
-and **M21** the next morning; both are open. Everything it says about M11-M18
-and M20 still holds.
+✅ **UPDATED 2026-08-21: M19 AND M21 ARE CLOSED TOO, and the signoff now
+checks two things it could not check before.** The paragraph below was written
+on 2026-08-20; **M19** was found that evening and **M21** the next morning, so
+for a day the "open list is EMPTY" claim was false. Both are now closed with CI
+asserting them on every run — `gds` + `precheck` + `gl_test` + `viewer` green
+at `b5120f4`, `harden` green at `d67f7fb`, pinned to **`lib-v1.7`**.
+⚠️ **Read that history as the point, not as a footnote.** Twice now the open
+list has been empty and twice a defect of the same shape was found immediately
+afterwards — a guard that ran, printed zeros, and was believed. Ten of the
+findings in this file are that shape. An empty list is evidence about what has
+been looked for, not about what is there.
 
 **M17 AND M20 ARE CLOSED (2026-08-20) and the open list is EMPTY.** Every
 must-be-zero metric is zero — including `timing__hold_vio__count`, which for
