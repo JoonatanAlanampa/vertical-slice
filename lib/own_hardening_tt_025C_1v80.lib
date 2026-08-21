@@ -22,6 +22,10 @@ library (own_sky130_tt_025C_1v80) {
     index_1("0.020, 0.050, 0.300, 1.500");
     index_2("0.002, 0.005, 0.025, 0.100");
   }
+  lu_table_template (mpw3) {
+    variable_1 : related_pin_transition;
+    index_1("0.020, 0.050, 0.300");
+  }
 
   cell (INV_X1) {
     area : 3.7536;
@@ -624,7 +628,15 @@ library (own_sky130_tt_025C_1v80) {
     cell_leakage_power : 1.064509;
     ff (IQ, IQN) { next_state : "D"; clocked_on : "CLK"; }
     pin (CLK) { direction : input; clock : true;
-          capacitance : 0.001373; }
+          capacitance : 0.001373;
+          timing () { related_pin : "CLK"; timing_type : min_pulse_width;
+            related_output_pin : "Q";
+            rise_constraint (mpw3) {
+              index_1("0.020, 0.050, 0.300");
+              values("0.08228, 0.08618, 0.14917"); }
+            fall_constraint (mpw3) {
+              index_1("0.020, 0.050, 0.300");
+              values("0.09448, 0.10059, 0.18750"); } } }
         pin (D) { direction : input; capacitance : 0.001107;
           timing () { related_pin : "CLK"; timing_type : setup_rising;
             rise_constraint (scalar) { values("-0.00189"); }

@@ -22,6 +22,10 @@ library (own_sky130_tt_025C_1v80) {
     index_1("0.020, 0.050, 0.300, 1.500");
     index_2("0.002, 0.005, 0.025, 0.100");
   }
+  lu_table_template (mpw3) {
+    variable_1 : related_pin_transition;
+    index_1("0.020, 0.050, 0.300");
+  }
 
   cell (INV_X1) {
     area : 3.7536;
