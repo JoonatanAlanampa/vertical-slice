@@ -134,6 +134,7 @@ DOC_TP = re.compile(r"^\|\s*(ff|tt|ss)\s*\([^)]*\)\s*\|(.+)\|\s*$", re.M)
 PS = re.compile(r"([\d.]+)\s*ps")
 
 BRINGUP = ROOT / "bringup" / "vslice_bringup.py"
+SDC = ROOT / "harden" / "signoff.sdc"
 
 
 def doc_tp_table():
@@ -150,6 +151,39 @@ def doc_tp_table():
         if len(vals) == len(RINGS):
             for ring, v in zip(RINGS, vals):
                 out[(m.group(1), ring)] = float(v)
+    return out
+
+
+def sdc_ro_periods():
+    """-> {pvt_short: period_ns} from harden/signoff.sdc's ro_period_by_pvt.
+
+    THE FOURTH DESCENDANT OF THE RING COMPUTATION, AND THE ONLY ONE THAT WAS
+    NEVER ASSERTED. docs/info.md's three tables and the bring-up script's two
+    constants are checked above; this table was not, and it has now gone stale
+    TWICE -- M14 (computed pre-M7, over-constraining by 35-47%) and M32
+    (transcribed on lib-v1.4, demanding 2.166 ns of an ss ring that runs at
+    3.116). Both times the fix landed as a regeneration and not as a check,
+    which is how it came back.
+
+    It matters more than a datasheet number, because this one is an INPUT to
+    signoff rather than an output. Too fast and the prescaler is timed against
+    a ring the die will never present, producing phantom setup violations that
+    get "fixed" with margin. Too slow and the counter signs off with headroom
+    it does not have, drops edges on silicon, and returns a LOW count -- which
+    reads as a slower cell than predicted, a perfectly plausible result that
+    is wrong.
+    """
+    txt = SDC.read_text(encoding="utf-8")
+    m = re.search(r"array set ro_period_by_pvt \{(.*?)\}", txt, re.S)
+    if not m:
+        sys.exit("ERROR: harden/signoff.sdc no longer defines "
+                 "ro_period_by_pvt. This check must not silently stop "
+                 "covering the constraint it was written for.")
+    out = {}
+    for line in m.group(1).splitlines():
+        f = line.split()
+        if len(f) == 2:
+            out[f[0].split("_")[0]] = float(f[1])
     return out
 
 
@@ -203,6 +237,8 @@ def main() -> int:
                     help="MHz, absolute; the doc prints one decimal")
     ap.add_argument("--count-tol", type=int, default=1,
                     help="counts, absolute; the doc prints an integer")
+    ap.add_argument("--sdc-tol", type=float, default=0.005,
+                    help="ns of slack allowed on signoff.sdc's ro_clk period")
     ap.add_argument("--tp-tol", type=float, default=0.02,
                     help="ps, absolute; the doc prints two decimals")
     args = ap.parse_args()
@@ -255,6 +291,21 @@ def main() -> int:
             if abs(fresh_tp[ring] - doc_ps) > args.tp_tol:
                 bad.append(f"  {pvt:>3s}/{ring:<6s} cell delay: doc "
                            f"{doc_ps:6.2f} ps   fresh {fresh_tp[ring]:6.2f} ps")
+
+    # The SDC's ring period must be the FASTEST ring at that PVT over every RC
+    # variant -- which is what the file's own comment says it is.
+    sdc = sdc_ro_periods()
+    if set(sdc) != set(PVTS):
+        sys.exit(f"ERROR: signoff.sdc covers {sorted(sdc)}, expected "
+                 f"{sorted(PVTS)}")
+    for pvt in PVTS:
+        fastest = max(got[(rc, pvt, ring)][0]
+                      for rc in ("min", "nom", "max") for ring in RINGS)
+        want = 1e3 / fastest
+        if abs(sdc[pvt] - want) > args.sdc_tol:
+            bad.append(f"  {pvt:>3s}       signoff.sdc ro_clk: file "
+                       f"{sdc[pvt]:.3f} ns   fresh {want:.3f} ns "
+                       f"({fastest:.1f} MHz, the fastest ring over min/nom/max RC)")
 
     pred_hz, band_hz = bringup_constants()
     if set(pred_hz) != set(RINGS) or set(band_hz) != set(RINGS):

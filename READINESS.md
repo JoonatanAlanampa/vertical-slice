@@ -1361,6 +1361,139 @@ assuming it — restricting to the four table NAMES is already unambiguous — a
 `parse_liberty()` now refuses to return a library in which the probe cells have
 no NLDM tables, rather than handing back an empty one.
 
+## The two pre-payment review gates, 2026-08-22. **Result: GO, and three things changed because of them.**
+
+Both adversarial gates were run against `2570cd1` before any payment decision:
+the submission preflight (is the artifact the chip we think we are buying, and
+are the docs true?) and the test-blindspot gate (what can this suite
+structurally not catch?).
+
+**Preflight returned GO with no blockers**, having re-derived rather than
+trusted: the packaged `tt_submission` netlist/LEF/GDS/OAS contain **zero**
+`sky130` content; synthesis stats (2764 cells) match `tools/audit_netlist.py`
+on the committed netlist instance-for-instance, so `SYNTH_ELABORATE_ONLY`
+really did preserve it; all nine `lib-v2.1` artifacts sha256-match `lib.lock`
+against the tag downloaded fresh from GitHub; each ring walks as a **single
+closed 31-stage loop** with the only fanout-2 net being `fb`; LVS unique at
+7006 devices matching the packaged netlist's own instance count; and the
+`2570cd1` and `03fa735` GDS files are **byte-identical apart from the GDSII
+timestamp records**.
+
+### Fixed as a result
+
+- **The CORDIC datapath had no shape assertion on the netlist that ships.**
+  `test_wakeup_440` measures the DDS rate; `test_code64_and_sigma_delta`
+  measures the sigma-delta's one-density. A triangle, a square, or a CORDIC
+  with one mis-mapped iteration passes both. So ~2700 of the die's ~2800 cells
+  — its stated function — were asserted only to be "periodic and zero-mean".
+  `test_sine.py::test_sine_waveform_shape` now least-squares-fits `uo[5:1]`
+  (which is `sin_s[15:11]` in offset binary, already on a pin) against an ideal
+  sine whose period comes from the RTL constant. **Thresholds measured, not
+  chosen**: this design fits to **0.795 LSB** worst residual, a triangle of
+  identical amplitude and phase would deviate by **3.36 LSB** and a square by
+  **15.92**, so the 1.5 LSB limit has ~2x margin on both sides. It carries **no
+  skip guard** and was verified on the actual submission netlist at gate level:
+  amplitude 15.97, residual 0.79 LSB, p2p 31 — identical to RTL, which is
+  independent evidence that the ABC mapping onto the own-cell library preserved
+  the waveform.
+- **`harden/signoff.sdc`'s `ro_clk` period is now asserted.** It is the fourth
+  descendant of the ring computation and was the only one nothing checked —
+  and it had gone stale **twice** (M14, M32), both times fixed by regeneration
+  rather than by a check, which is why it came back. `flow/check_ring_doc.py`
+  now parses `ro_period_by_pvt` and asserts each entry is the fastest ring at
+  that PVT over every RC variant, to 5 ps. Verified both ways: it passes on
+  the current file and, with ss set back to the stale 2.166, fails naming
+  3.116 ns / 320.9 MHz.
+- **`flow/ring_prediction.py` now counts its arcs.** `parse()` collected
+  whatever the SDF regex matched and `silicon()` multiplied the mean by the
+  *assumed* stage count, so a ring that lost arcs would publish a confident
+  frequency computed from a fraction of itself. This is M33's sibling on the
+  same file. It now asserts the census against `COMPOSITION` (93 arcs) and
+  exits naming the shortfall.
+- **Twelve published figures were wrong**, all of them numbers living in a
+  sentence rather than in one of the tables `check_ring_doc.py` asserts — M21's
+  shape, one layer out. Corrected and re-verified: the blend bias
+  (+0.84/+1.21/+1.68 → **+1.16/+1.38/+1.62 %**), the de-blend magnitude
+  (1.2 → **1.38 %**), the ring fanout census (29 → **30** nets at fanout 1),
+  the ring wire capacitance (0.33-0.75 fF against ~2.1 fF pin → **0.10-1.57 fF
+  against 2.62-2.70 fF**, i.e. 4-58 %), the corner spread (98.5 → **98.4 %**),
+  the SDC's tolerance ratio (27 → **38 %**, which had contradicted the headroom
+  table three lines above it), two stale run citations, and the bring-up
+  script's fixed-point slew range (14-85 → **16.8-118.6 ps**).
+- ⭐ **`docs/info.md` never stated `ui[5]`'s polarity.** Every other selector
+  had a table; the one bit that picks the measurement window had neither table
+  nor sentence, so a person at the demo board had to guess it. Now spelled out
+  (0 = short 2^12, 1 = long 2^20) with the RTL signal named.
+
+### Refuted — recorded because the alarm was quantitative and wrong
+
+⛔ **"`min_pulse_width` is 2.4-3.3x more optimistic than the foundry's."** It is
+not, and the comparison that produced it is invalid. `sky130_fd_sc_hd__dfxtp_1`'s
+`min_pulse_width` table is indexed at clock slews 0.01 / 0.5 / 1.5 ns with
+values 0.1687 / 0.8333 / 2.5000 ns — and **0.8333333 is exactly 0.5 x 5/3, and
+2.5 is exactly 1.5 x 5/3**. The foundry's two upper rows are a formulaic guard,
+not silicon. Comparing our *measured* 238.5 ps at 300 ps slew against that
+clamp compares a measurement to a placeholder. At the only genuinely measured
+row, ours is **136.7 / 179.9 ps against the foundry's 168.7 / 208.2** — i.e.
+**1.16-1.23x**, modest and in the direction a faster flop should go. The
+published headroom stands.
+
+⚠️ The underlying observation is still worth keeping: at the 300 ps `MPW_SLEWS`
+row the boundary pulse is a triangle peaking near **0.74 x VDD**, so it never
+reaches the rail, while a real narrow clock pulse at a flop pin is made of two
+full-swing edges. That is a parameterization question about the top row of the
+table, not a 3x error, and the prescaler's actual CLK slew (~195 ps) sits below
+it.
+
+### Refined — the direction matters, and it is the safe one
+
+⚠️ **The DFF's setup+hold aperture IS narrower than the foundry's** (tt rise:
+ours 4.5 + 2.1 = 6.6 ps, `dfxtp_1` 50.8 + (−28.5) = 22.3 ps), and
+`READINESS`'s "≤ 4.7 ps criterion caveat" does **not** bound that gap — it
+bounds only the criterion, measured on our own cell. That correction stands.
+✅ **But on HOLD, which is the only check that binds on this die, our library is
+MORE pessimistic than the foundry's, not less**: ours demands **+13.06 ps**
+(ff, rising D) where `dfxtp_1` declares **−28.5 ps**. A negative hold
+requirement is free margin the foundry grants itself and we do not. Setup is
+where our aperture is genuinely tighter, and setup has **+10.3 ns** of slack at
+a 20 ns constraint on a chip that ships at 40 ns. So the aperture difference
+cannot move a conclusion here, and it errs safe on the check that could.
+
+### Accepted, documented, and NOT closed
+
+- 🔴 **M34 — intra-cell RESISTANCE was never extracted. M26 is half closed.**
+  All nine `out/par/*.par.spice` contain **zero `R` devices**: a plain magic
+  `extract all` writes no resistance network (that needs `extresist`), and
+  `rthresh 0` cannot keep what was never extracted. So li1/met1 series
+  resistance, contact/via resistance and distributed poly gate resistance are
+  still absent — same sign as M26, one-signed and always optimistic, roughly an
+  order of magnitude smaller, and **unquantified**. Two docstrings claimed
+  otherwise and are corrected (`stdcells/flow/parasitic/README.md`,
+  `stdcells/flow/characterize.py`). ⭐ **It moves the answer key, not the
+  chip**: the die returns whatever count it returns, and a corrected library can
+  be compared against that count afterwards. Closing it means adding
+  `extresist` and re-characterizing — a stdcells task.
+- **The GL SDF run exercises only `nom_tt`** (`test/run_gl_own.py`), while M31
+  was an **ff-only** corruption. Running the three corners is two extra 32-second
+  jobs and would give the ss/ff SDFs a consumer that is not the code that
+  produced them.
+- **`div_live` and the heartbeat are asserted nowhere.** The heartbeat is the
+  clock reference every published ring number is computed from at bring-up;
+  `div_live` is the datasheet's only independent cross-check on the counter.
+- **No provenance binds the liberty to the layout it describes.** `lib.lock`
+  freezes the files together; nothing proves the liberty was *derived from* that
+  GDS. `lib-v2.1` was also built with `STDCELLS_REUSE_DECKS=1`, and the record
+  of which decks were reused is a console line. A provenance header in
+  `emit_liberty()` (GDS sha, per-cell extraction sha, reuse counts) checked by
+  `tools/verify_lib.py` would close both.
+- **`RUN_KLAYOUT_XOR = 0`** — a magic-vs-KLayout streamout discrepancy would be
+  invisible. Bounded by both decks passing independently on the same file.
+- **The CORDIC is never quiesced during a ring measurement**: `code` still
+  drives the DDS in test mode, so ~2700 cells toggle while the ring is counted.
+  Worst on-die IR drop is 46.6 µV and the window integrates 4096+ clocks, so it
+  is second-order — but the die cannot report a quiet-supply ring frequency and
+  nobody should be surprised by that in 2027.
+
 ## What is left, in order
 
 `gds` is green, so nothing below blocks the *mechanics* of submitting. These

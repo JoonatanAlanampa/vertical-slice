@@ -119,7 +119,7 @@ if {[info exists ::env(FALLBACK_SDC)] && [file exists $::env(FALLBACK_SDC)]} {
 #
 # The constraint is now the corrected prediction itself, which makes the
 # margin an honest ratio instead of a slack figure. What the netlist actually
-# tolerates, measured on run 30934157150 (worst ro_clk->ro_clk arrival plus a
+# tolerates, measured on run 32564385882 (worst ro_clk->ro_clk arrival plus a
 # 70 ps setup/uncertainty allowance):
 #
 #     corner    ring period   counter needs   HEADROOM
@@ -127,8 +127,8 @@ if {[info exists ::env(FALLBACK_SDC)] && [file exists $::env(FALLBACK_SDC)]} {
 #     tt         2.183 ns       1.516 ns      1.44x
 #     ss         3.116 ns       2.264 ns      1.38x   <- binding
 #
-# So the instrument survives a ring up to 27% FASTER than predicted at the
-# binding corner. That ratio, not a picosecond count, is the number to check
+# So the instrument survives a ring up to 38% FASTER than predicted at the
+# binding corner (1.38x, ss). That ratio, not a picosecond count, is the number to check
 # against the first silicon measurement — and it is the number M6 should be
 # quoted as from now on.
 array set ro_period_by_pvt {

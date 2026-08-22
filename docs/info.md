@@ -45,8 +45,11 @@ Three ring oscillators, one per cell flavor, 31 stages each:
 
 Raise `ui[4]` (RUN) and the selected ring is enabled, given 256 clocks to
 warm up, then its output — divided by 256 on-chip — is counted for a
-fixed window of system clocks. `ui[5]` picks the window: 2^12 clocks
-(164 us at 25 MHz) or 2^20 (41.9 ms). The result latches into a 24-bit
+fixed window of system clocks. **`ui[5]` picks the window: 0 = short,
+2^12 clocks (164 us at 25 MHz); 1 = long, 2^20 clocks (41.9 ms).** The
+polarity is `win_long = ui_in[5]` in `ro_meas.sv`; it is spelled out here
+because every other selector on this page has a table and this one did not,
+which left the one bit whose sense a person has to guess at the bench. The result latches into a 24-bit
 counter, read out a byte at a time on `uo[7:0]` with `ui[3:2]`:
 
 | `ui[3:2]` | `uo[7:0]` |
@@ -77,8 +80,8 @@ measures that stage directly:
 tp_INV = ( 1/f_INV - 1/(31 * f_NAND2) ) / 60
 ```
 
-**Use it.** The blend is a one-signed bias of **+0.84 % (ff) / +1.21 % (tt) /
-+1.68 % (ss)** — larger than the ±0.8 % RC band this page publishes below,
+**Use it.** The blend is a one-signed bias of **+1.16 % (ff) / +1.38 % (tt) /
++1.62 % (ss)** — larger than the ±0.8 % RC band this page publishes below,
 larger than the 1.0-1.2 % loop-closure correction that was thought worth a
 paragraph, and it lands on the simplest cell, the one the device model
 predicts most directly. Everything needed to correct it was already on this
@@ -87,7 +90,7 @@ page; the correction was not, until 2026-08-21.
 ⚠️ The de-blend charges the INV ring's NAND2 stage at the delay it shows in
 the *NAND2* ring, where it drives a NAND2 rather than an inverter. The two
 input pins differ by 0.001 fF and the driving slew differs, worth ~0.3 % on
-that one stage — i.e. ~0.01 % on `tp_INV`, against the 1.2 % the de-blend
+that one stage — i.e. ~0.01 % on `tp_INV`, against the 1.38 % the de-blend
 removes. Exact enough; not exact.
 
 **What the cell delays should be** (same model and run as the count table
@@ -110,7 +113,7 @@ low-pass (1 kOhm + 100 nF) or the TT Audio Pmod. Sweep `ui[6:0]` to walk
 the frequency table; `uo[6]` gives the scope a trigger.
 
 **What the counts should be.** Our own timing model predicts, per PVT
-corner (short window, 25 MHz clock, run `32562513694`, `lib-v2.1`;
+corner (short window, 25 MHz clock, run `32564385882`, `lib-v2.1`;
 regenerate with `python flow/ring_prediction.py --run <run-dir>`, and
 `flow/check_ring_doc.py` asserts on every CI run that this table still
 matches the design being built):
@@ -141,7 +144,7 @@ model; only a miss outside all three bands is a real disagreement.
 **One stage per ring is charged double.** The loop-closure node — `fb`, which
 is the same net as `n[30]` and `osc` — drives stage 0 *and* the tap into
 `ro_meas`, so it carries two pin loads where every other node carries one.
-Measured on the routed netlist (29 nets at fanout 1, `fb` at 2, and **no
+Measured on the routed netlist (30 nets at fanout 1, `fb` at 2, and **no
 buffer on it**, which is H3 staying fixed). Charging it costs **1.0-1.2%**,
 and the table above already includes it; predictions published before
 2026-08-04 do not.
@@ -157,10 +160,13 @@ optimistic**. What changed is the model, not the chip:
   by 4.5% rather than 3%.
 - The SDF carries **no interconnect on the ring nets at all** (every entry
   exactly 0.000, while ordinary nets in the same file carry 1-2 ps). The
-  parasitics do exist in `final/spef/`, and the wire is worth 0.33-0.75 fF
-  against a ~2.1 fF pin capacitance — 15-35% more load than the delay was
-  computed for. Its own RC propagation is nothing (14.3 ohm on 0.83 fF is
-  ~0.012 ps); it matters purely as load.
+  parasitics do exist in `final/spef/`, and the wire is worth
+  **0.10-1.57 fF** (mean 0.53) against a **2.62-2.70 fF** pin capacitance,
+  i.e. **4-58% more load** than the delay was computed for. Its own RC
+  propagation is nothing; it matters purely as load.
+  ⛔ The figures here until 2026-08-22 — 0.33-0.75 fF against ~2.1 fF, 15-35% —
+  were measured on a `lib-v1.x` run and are dead. Re-measured on this run's
+  `nom` SPEF with `flow/ring_prediction.py`'s own extractor.
 - **STA computed every inverting cell's delay at an input slew of zero**,
   because this library's transition tables were negative for inverting
   cells and OpenSTA clamps them (`READINESS.md` M11). ✅ **Fixed at the
@@ -177,15 +183,17 @@ optimistic**. What changed is the model, not the chip:
   in, and OpenSTA extrapolated silently; that is precisely what M27 was.
 
 **The numbers barely moved when M11 was fixed, and that is not evidence
-the defect was harmless.** tt went 625.0 → 628.4 / 459.1 → 460.1 / 294.5 →
-294.8 MHz, all under 1%. A ring's period is the SUM of both edge delays
+the defect was harmless.** ⛔ *(The MHz figures in this paragraph are
+`lib-v1.4`-era and are DEAD — the live table is the one above, 455.4 / 323.6 /
+225.3 at tt. They are kept only because the RATIO between them is the point.)*
+tt went 625.0 → 628.4 / 459.1 → 460.1 / 294.5 → 294.8 MHz, all under 1%. A ring's period is the SUM of both edge delays
 around the loop, and M11 exchanged which slew drove which edge, so the
 total was preserved almost exactly. Where the two edges are *not* summed
 the same defect was worth **766 ps** of setup slack on stdcells' own
 CORDIC-1 harden, and it hid **58 max-slew violations** here (`M12`).
 
 The corner spread is now genuine (`READINESS.md` M10): ff and ss differ on
-98.5% of cell delay arcs, so -40 C and 100 C really are different columns.
+98.4% of cell delay arcs, so -40 C and 100 C really are different columns.
 
 ⚠️ **Set the selectors BEFORE raising `ui[4]`, as two separate motions.**
 `ui[1:0]` (ring) and `ui[5]` (window) are latched on the clock edge that arms

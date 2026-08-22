@@ -75,7 +75,7 @@ BYTE_LO, BYTE_MID, BYTE_HI, BYTE_STATUS = 0, 1, 2, 3
 ST_BUSY, ST_VALID = 0x01, 0x02
 
 # What our own timing model says (flow/ring_prediction.py --run, all-own
-# netlist, run 30767123276, netlist 0a86598). Nominal is tt/25C/1.80V; the
+# netlist, run 32564385882 on lib-v2.1). Nominal is tt/25C/1.80V; the
 # corner band is what a room-temperature part is allowed to land in.
 #
 # Updated 2026-08-03 (M7 closed). The previous values (914.1 / 658.3 /
@@ -86,13 +86,14 @@ ST_BUSY, ST_VALID = 0x01, 0x02
 #      most expensive one — so it was 4.5% short, not 3%.
 #   2. The ring nets carry NO interconnect in the SDF (0.000 everywhere,
 #      while ordinary nets in the same file carry 1-2 ps). The parasitics
-#      exist in final/spef and are worth 0.33-0.75 fF of extra load on a
-#      ~2.1 fF pin cap.
+#      exist in final/spef and are worth 0.10-1.57 fF (mean 0.53) of extra
+#      load on a 2.62-2.70 fF pin cap, i.e. 4-58 %.
 #   3. Every inverting cell's delay was computed at an input slew of ZERO,
 #      because the library's transition tables are negative for inverting
 #      cells and OpenSTA clamps them (M11). These numbers instead solve the
 #      ring's own fixed point, where input slew = previous stage's output
-#      slew, landing at 14-85 ps.
+#      slew, landing at 16.8-118.6 ps -- all INTERIOR to the NLDM grid,
+#      which starts at 10 ps as of lib-v2.0 (stdcells M27).
 # Before 2026-08-02 the table said 442.7 / 359.2 / 252.1 MHz, which was a
 # prediction of a DIFFERENT circuit: a stray BUF_X2 then hung off every ring
 # node (H3, fixed).
@@ -118,8 +119,8 @@ def stage_delay_s(f_ring, ring="NAND2", f_nand2=None):
     chains. NOT exact for the INV ring: an odd-stage ring needs its enable
     gate somewhere, and here it is stage 0, so that ring is 30 INV_X1 + 1
     NAND2_X1 (src/ro_ring.sv). Dividing its period by 2*STAGES returns a
-    30:1 BLEND of the two cells, biased +0.84 % (ff) / +1.21 % (tt) /
-    +1.68 % (ss) -- one-signed, and larger than the RC band the datasheet
+    30:1 BLEND of the two cells, biased +1.16 % (ff) / +1.38 % (tt) /
+    +1.62 % (ss) -- one-signed, and larger than the RC band the datasheet
     publishes. De-blend it with the NAND2 ring, which measures that stage
     directly:  tp_INV = (1/f_INV - 1/(31*f_NAND2)) / 60.
 

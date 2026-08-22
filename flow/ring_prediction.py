@@ -147,6 +147,28 @@ def measured_arcs(per):
     `live_*` is None when every arc of that cell in that ring was the break —
     which happens to the INV ring, whose single NAND2 gate is the broken one.
     """
+    # M33's sibling, closed 2026-08-22. This used to average whatever the SDF
+    # regex happened to match and multiply the mean by the ASSUMED stage count
+    # from COMPOSITION -- so a ring that lost arcs (renamed instances, a
+    # changed hierarchy separator, a negative delay that the `[\d.]+` pattern
+    # cannot match and therefore DROPS) would publish a confident frequency
+    # computed from a fraction of the ring, with no symptom anywhere. The
+    # netlist-side census in tools/audit_netlist.py cannot see this: it counts
+    # CELLS, this counts ARCS, and they are different artifacts.
+    want = {}
+    for ring, comp in COMPOSITION.items():
+        for cell, n in comp.items():
+            want[(ring, cell)] = n
+    got = {k: len(v[0]) for k, v in per.items()}
+    if got != want:
+        short = {k: (got.get(k, 0), n) for k, n in want.items()
+                 if got.get(k, 0) != n}
+        extra = {k: v for k, v in got.items() if k not in want}
+        sys.exit(f"ERROR: SDF arc census does not match the ring composition. "
+                 f"got/expected {short}" + (f", unexpected {extra}" if extra else "")
+                 + ". Refusing to publish a ring frequency computed from a "
+                 "subset of its stages.")
+
     out = {}
     for key, (rise, fall) in per.items():
         pairs = list(zip(rise, fall))
