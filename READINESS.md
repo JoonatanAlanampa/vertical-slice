@@ -50,7 +50,7 @@ understatement on the cell driving the slowest ring on this die.
 | M20 | The bare-die `harden` build had silently drifted from the submitted build on **four** settings, so it was never the stand-in it is supposed to be | ✅ **CLOSED 2026-08-20** — aligning them closed hold at **+30.90 ps** and made `design__core__area` **identical** (34255.4). ⚠️ `CTS_MAX_CAP` was **not** the cause; that first answer is recorded as wrong. See below |
 | — | `gds` workflow red since 2026-07-25 | ✅ **GREEN** — the linter now runs clean via `CELL_VERILOG_MODELS`, so the upstream `cat` finds its log |
 | M5 | Documented read sequence permits a torn 24-bit count | ✅ **FIXED** — doc bug only; hardware and bring-up script were already correct |
-| M6 | Prescaler in the RO clock domain has no generated-clock constraint | ✅ **CLOSED, re-measured on lib-v1.4 2026-08-04** — all nine views close, worst **+517 ps**; quote the **1.27x headroom**, not a slack figure |
+| M6 | Prescaler in the RO clock domain has no generated-clock constraint | ✅ **CLOSED, re-measured on `lib-v2.1` 2026-08-22** — all nine views close, band **+694 .. +934 ps**; quote the **1.38x headroom** at the binding corner, not a slack figure. ⛔ The old **1.27x** and the +513..579 ps band are DEAD |
 | M13 | `check_signoff.py` had **no timing entry at all** — a green run carried 5 setup violations | ✅ **CLOSED 2026-08-04** — setup/hold violation counts added; the previously-green run now fails |
 | M14 | `ro_clk` SDC period table stale (pre-M7 predictions), over-constraining 35-47% | ✅ **CLOSED 2026-08-04** — regenerated from the corrected model; that gap *was* M13's violations |
 | M7 | `ring_prediction.py` may sum cell delays only, not interconnect | ✅ **CLOSED** — the quoted prediction was **32-46% optimistic**; now computed from SPEF + a self-consistent slew, per corner |
@@ -58,7 +58,7 @@ understatement on the cell driving the slowest ring on this die.
 | M12 | 58 max-slew violations at ss, hidden by M11's clamped-to-zero slews | ✅ **CLOSED 2026-08-04** — repair could not see them (one estimated-parasitic view, no RC corners yet); fixed with repair margin, not a looser limit |
 | L8 | User-facing text quotes one PVT although `lib.lock` pins three | ✅ **FIXED** — text corrected, and the stated *reason* was wrong (see M10) |
 | M10 | Corner-aware STA was not in effect (0.2% of arcs moved between PVT views) | ✅ **FIXED** — now **98.5%**, max delta 155% |
-| M19 | **No cell in the library declares a `min_pulse_width`**, so OpenSTA's min-pulse-width check has no requirement to apply and CANNOT FAIL — however narrow the clock pulse gets. It lands on the prescaler, which is clocked DIRECTLY by the ring | ✅ **CLOSED 2026-08-21** — measured in `stdcells` **lib-v1.7** and re-pinned here; `gds` green with the check passing at all nine corners, binding margin **+577.9 ps**, positive control firing. See below |
+| M19 | **No cell in the library declares a `min_pulse_width`**, so OpenSTA's min-pulse-width check has no requirement to apply and CANNOT FAIL — however narrow the clock pulse gets. It lands on the prescaler, which is clocked DIRECTLY by the ring | ✅ **CLOSED 2026-08-21** — measured in `stdcells` **lib-v1.7** and re-pinned here; `gds` green with the check passing at all nine corners. ⛔ The **+577.9 ps** binding margin was lib-v1.7's; on `lib-v2.1` it is **+704.6 ps** at `_4880_/CLK` (low), `max_ff`, positive control still firing. See below |
 | M21 | **The published ring predictions in `docs/info.md` were computed on `lib-v1.4` and run `30934157150`, and nothing regenerates or checks them** | ✅ **CLOSED 2026-08-21** — regenerated against run `32481579140` (lib-v1.7) and now asserted on every `gds` run by `flow/check_ring_doc.py`. The wiring is the half that matters. See below |
 | — | The DFF constraints are "optimistic by an **unquantified** margin" against foundry practice (capture boundary vs degradation criterion) — standing since lib-v1.0, spanning setup, hold and `min_pulse_width` | ✅ **QUANTIFIED 2026-08-21** — at most **+4.7 ps**, and **+0.5 ps** at the corner where hold binds. Recorded, not closed by redefinition. See item 3 of "What is left" |
 | M31 | **The re-pin to `stdcells` `lib-v2.0` did not route: `gds` and `harden` both died at `[DPL-0036]`.** The cause was in the LIBERTY, not in placement — `DFF_X1` `cell_fall` at the **ff (hold) corner** held **−7.258…−8.499 ns in 15 of 20 entries** | ✅ **CLOSED 2026-08-22** — fixed at source in `stdcells` **`lib-v2.1`** and re-pinned here. The whole library diff is **one table, fifteen numbers**. See below |
@@ -202,9 +202,11 @@ submitted build: **`timing__hold_vio__count = 0` at all nine corners, worst
 hold slack +41.45 ps at min_ff**, 63 hold buffers, utilization 56.2%, and
 repair converging with **no RSZ-0064 at all**.
 
-### M20 — the bare-die build was never the stand-in it is supposed to be. PARTLY OPEN.
+### M20 — the bare-die build was never the stand-in it is supposed to be. **FULLY CLOSED 2026-08-22.**
 
-**The bare-die `harden` build did not close on lib-v1.6 and still does not.**
+✅ **UPDATE 2026-08-22: the bare die now CLOSES.** On `lib-v2.1` the `harden` build (run **32563287295**) signs off at hold WNS **+35.67 ps** and setup WNS **+701.4 ps**. The paragraph below is the lib-v1.6 history and is kept because its diagnosis — that the two builds must place into the same core — is what made this closable; ⛔ do not read its "still does not" as current.
+
+**(history) The bare-die `harden` build did not close on lib-v1.6.**
 It went marginally *worse* under a 6x bigger hold margin (-7.62 → -9.02 ps,
 buffers 20 → 55), with **WNS pinned at exactly -0.017 on `_4935_/D` from
 iteration 250 to the end, identical at hold-margin 0.005 and 0.030**. A number
@@ -289,8 +291,30 @@ check the first silicon measurement against, because the thing that could
 break the instrument is silicon ringing faster than the model says — not a
 picosecond count against a constraint we chose.
 
-⚠️ **RE-EXAMINED ON lib-v1.6, 2026-08-20 — the direction survives, the exact
-ratio is flagged rather than silently updated.** M17 was owed this: every
+✅ **REGENERATED ON `lib-v2.1`, 2026-08-22 — and the ratio is now COMPUTED
+BY A RECORDED METHOD, which is what the ⛔ note below asked for.** The method
+was never missing, only never written where anyone looked: `harden/signoff.sdc`
+states it — *ring period / (worst `ro_clk`→`ro_clk` arrival + a 70 ps
+setup/uncertainty allowance)*. Applied to the green run **32563287238**, it
+reproduces the old figures from the old run's arrivals exactly (1.358/0.890 =
+1.53x, 1.601/1.150 = 1.39x, 2.166/1.700 = 1.27x), so it IS the original method.
+On `lib-v2.1`:
+
+| corner | ring period | counter needs | headroom |
+|---|---|---|---|
+| ff | 1.774 ns | 1.159 ns | 1.53x |
+| tt | 2.183 ns | 1.516 ns | 1.44x |
+| ss | 3.116 ns | 2.264 ns | **1.38x** ← binding |
+
+Setup slack in the `ro_clk` domain across all nine views is **+694 .. +934 ps**
+(was +513..579 on lib-v1.6). ⭐ The headroom IMPROVED even though every cell got
+slower, because the ring slowed *more* than the counter did — the ring is 31
+lightly-loaded stages, the counter is not. ⛔ **The 1.27x / 1.39x / 1.53x band
+below is superseded**; the ss entry coinciding with the old ff entry at 1.53x
+is a coincidence of two different corners.
+
+ℹ️ **(history) RE-EXAMINED ON lib-v1.6, 2026-08-20 — the direction survives, the
+exact ratio was flagged rather than silently updated.** M17 was owed this: every
 hold *and setup* statement in this file was written against constraints that
 were `0.0` / `0.00024`, and lib-v1.6 moved the setup ones too (ss's falling-D
 requirement went 19.775 → 43.274 ps). Measured on the submitted run, same
@@ -317,6 +341,10 @@ would be a new number wearing an old one's name. That is the exact failure
 this file exists to prevent. The ratio needs recomputing by its original
 method, or replacing with a scripted one; the slack table above is what is
 measured and defensible today.
+✅ **CLOSED 2026-08-22 by the block at the top of this section**: the original
+method was recorded in `harden/signoff.sdc` all along, it reproduces the old
+numbers from the old run's arrivals, and the `lib-v2.1` ratios are computed
+with it rather than hand-derived.
 
 **What M11 cost, so the size of it is on record.** On stdcells' own CORDIC-1
 harden at a byte-identical netlist, correcting the library removed **766 ps of
@@ -1050,9 +1078,12 @@ last regenerated at `5ded3aa`. A number nobody recomputes is a number that
 drifts silently, which is this project's signature defect wearing yet another
 hat.
 
-✅ **BOTH HALVES DONE 2026-08-21.** (1) `docs/info.md` is regenerated against
-run **`32481579140`** on **`lib-v1.7`**, both tables and the provenance
-sentence. (2) `flow/check_ring_doc.py` is wired into `gds.yaml` and now
+✅ **BOTH HALVES DONE 2026-08-21**, and ✅ **REGENERATED AGAIN 2026-08-22 for
+`lib-v2.1`** (run **`32562513694`**, re-verified on the green run
+**`32563287238`**) — this time together with `bringup/vslice_bringup.py` and
+`harden/signoff.sdc`, which descend from the same computation and had been
+drifting independently (that was M32). (1) `docs/info.md` is regenerated,
+both tables and the provenance sentence. (2) `flow/check_ring_doc.py` is wired into `gds.yaml` and now
 asserts, on every run, that the published table still matches the design being
 built — comparing both tables, failing loudly if either side parses to
 anything other than 9 cells, and resolving the run directory rather than
@@ -1343,28 +1374,35 @@ table since `5ded3aa`. The findings table above had been kept current and this
 list had not. That is worth noticing in a file whose whole subject is numbers
 that mean less than they look.
 
-1. ✅ **M19 — `min_pulse_width`. CLOSED 2026-08-21.** Measured in `stdcells`
-   **lib-v1.7** (`harden` green, tagged), re-pinned here, and checked on every
-   `gds` run by `flow/check_min_pulse_width.py` — nine corners at nine ring
-   periods, requirements read at the propagated clock slew, binding margin
-   **+577.9 ps** at `max_ff`, and a positive control that flags 16 ring pins
-   when the requirement is inflated to 9 ns.
+1. ✅ **M19 — `min_pulse_width`. CLOSED 2026-08-21, margins refreshed for
+   `lib-v2.1` 2026-08-22.** Measured in `stdcells` **lib-v1.7** (`harden`
+   green, tagged), re-pinned here, and checked on every `gds` run by
+   `flow/check_min_pulse_width.py` — nine corners at nine ring periods,
+   requirements read at the propagated clock slew, binding margin
+   **+704.6 ps** at `max_ff` (⛔ lib-v1.7's +577.9 ps is dead), and a positive
+   control that flags 16 ring pins when the requirement is inflated to 9 ns.
    ✅ **The associated WORRY is answered and should not be re-raised:**
    min-pulse-width is **not** the binding limit on the instrument. Measured
    2026-08-21 by running `flow/check_min_pulse_width.py` against the real
    routed design (run `32412600538`) with the lib-v1.7 liberties — so these are
    OpenSTA's own numbers at the propagated clock slew, not an estimate:
 
+   ⛔ **The lib-v1.7 table that stood here is DEAD.** Regenerated 2026-08-22
+   from the green run **32563287238** on `lib-v2.1` (`flow/check_min_pulse_width.py`
+   runs it in CI at all nine corners, requirements read at the propagated clock
+   slew):
+
    | corner | pulse available | worst requirement | headroom | M6 counter |
    |---|---|---|---|---|
-   | ff | 679.0 ps | 101.1 ps | **6.72x** | 1.53x |
-   | tt | 800.5 ps | 142.9 ps | **5.60x** | 1.39x |
-   | ss | 1083.0 ps | 222.4 ps | **4.87x** | **1.27x** |
+   | ff | 887.0 ps | 182.4 ps | **4.86x** | 1.53x |
+   | tt | 1091.5 ps | 267.3 ps | **4.08x** | 1.44x |
+   | ss | 1558.0 ps | 406.5 ps | **3.83x** | **1.38x** |
 
-   The counter binds at every corner, by a factor of 3.8–4.4. The worst check
-   on the die is `_4879_/CLK` — the prescaler flop clocked directly by the
-   ring, i.e. exactly the pin this defect is about — and the binding margin is
-   **+577.9 ps** at `max_ff`.
+   The counter still binds at every corner, now by a factor of **2.8–3.2**
+   (was 3.8–4.4 — both margins grew, the counter's by less). The worst check on
+   the die remains `_4879_/CLK`/`_4880_/CLK` — the prescaler flops clocked
+   directly by the ring, i.e. exactly the pins this defect is about — and the
+   binding margin is **+704.6 ps** at `max_ff` (was +577.9 on lib-v1.7).
    ⚠️ The **1.9x** that prompted the original worry came from extrapolating the
    FOUNDRY `dfxtp_1`; do not re-quote it. And the capture-boundary caveat that
    could have undermined this is measured at **1.05–1.06x** (item 3), not the
@@ -1398,6 +1436,16 @@ that mean less than they look.
    ⛔ **Recorded, not closed by a change of criterion**, deliberately: switching
    would redefine three constraints across two repos to buy under 5 ps. Do not
    re-open without a number that says otherwise.
+   ⚠️ **NOT RE-DERIVED ON `lib-v2.1`, and stated as an argument rather than a
+   measurement.** The +4.7 / +0.5 ps figures were measured on `lib-v1.6`;
+   re-running them is its own ngspice characterization. The reason it does not
+   gate a decision: the shift is a property of how abruptly THIS flop fails, it
+   was one-signed and pessimistic, and even scaling it with the ~+20 % the
+   extracted layout added puts it under ~6 ps — against **+35.67 ps** of worst
+   hold slack, **+694 ps** of `ro_clk` setup and **+704.6 ps** of
+   `min_pulse_width` margin. It cannot flip any of the three. If a future
+   session wants it closed rather than bounded, that is a stdcells
+   characterization task, not a vertical-slice one.
 
 **What is no longer a reason to wait**: the badge, the connectivity signoff,
 the corner spread, the untimed ring domain, and both silent-corruption bugs

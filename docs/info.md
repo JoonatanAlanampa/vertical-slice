@@ -164,11 +164,17 @@ optimistic**. What changed is the model, not the chip:
 - **STA computed every inverting cell's delay at an input slew of zero**,
   because this library's transition tables were negative for inverting
   cells and OpenSTA clamps them (`READINESS.md` M11). ✅ **Fixed at the
-  source in `stdcells` lib-v1.4**, pinned here since 2026-08-04. The table
-  above solves the ring's own fixed point — each stage's input slew is the
-  previous stage's output slew — which lands at 12-87 ps depending on cell
-  and corner, below the NLDM's first characterized row (20 ps), which is
-  why the fixed point is used rather than a lookup.
+  source in `stdcells` lib-v1.4**; the pin has carried that fix since
+  2026-08-04 and is now **`lib-v2.1`**. The table above solves the ring's
+  own fixed point — each stage's input slew is the previous stage's output
+  slew — which lands at **17-119 ps** depending on cell, edge and corner.
+  ✅ **Since `lib-v2.0` the NLDM grid starts at 10 ps** (`stdcells` M27), so
+  every one of those fixed points is now INTERIOR to the characterized
+  table instead of extrapolated below its first row.
+  ⛔ The figures this bullet carried until 2026-08-22 — 12-87 ps against a
+  first row of 20 ps — described `lib-v1.x` and are dead. Under those, the
+  ring's own operating point sat outside the box the library was measured
+  in, and OpenSTA extrapolated silently; that is precisely what M27 was.
 
 **The numbers barely moved when M11 was fixed, and that is not evidence
 the defect was harmless.** tt went 625.0 → 628.4 / 459.1 → 460.1 / 294.5 →
