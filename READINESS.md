@@ -61,6 +61,7 @@ understatement on the cell driving the slowest ring on this die.
 | M19 | **No cell in the library declares a `min_pulse_width`**, so OpenSTA's min-pulse-width check has no requirement to apply and CANNOT FAIL — however narrow the clock pulse gets. It lands on the prescaler, which is clocked DIRECTLY by the ring | ✅ **CLOSED 2026-08-21** — measured in `stdcells` **lib-v1.7** and re-pinned here; `gds` green with the check passing at all nine corners, binding margin **+577.9 ps**, positive control firing. See below |
 | M21 | **The published ring predictions in `docs/info.md` were computed on `lib-v1.4` and run `30934157150`, and nothing regenerates or checks them** | ✅ **CLOSED 2026-08-21** — regenerated against run `32481579140` (lib-v1.7) and now asserted on every `gds` run by `flow/check_ring_doc.py`. The wiring is the half that matters. See below |
 | — | The DFF constraints are "optimistic by an **unquantified** margin" against foundry practice (capture boundary vs degradation criterion) — standing since lib-v1.0, spanning setup, hold and `min_pulse_width` | ✅ **QUANTIFIED 2026-08-21** — at most **+4.7 ps**, and **+0.5 ps** at the corner where hold binds. Recorded, not closed by redefinition. See item 3 of "What is left" |
+| M31 | **The re-pin to `stdcells` `lib-v2.0` did not route: `gds` and `harden` both died at `[DPL-0036]`.** The cause was in the LIBERTY, not in placement — `DFF_X1` `cell_fall` at the **ff (hold) corner** held **−7.258…−8.499 ns in 15 of 20 entries** | ✅ **CLOSED 2026-08-22** — fixed at source in `stdcells` **`lib-v2.1`** and re-pinned here. The whole library diff is **one table, fifteen numbers**. See below |
 
 ✅ **UPDATED 2026-08-21: M19 AND M21 ARE CLOSED TOO, and the signoff now
 checks two things it could not check before.** The paragraph below was written
@@ -1180,6 +1181,94 @@ different sentences. None blocks fabrication; together they mean the number
 comes back with a wider and less attributable error bar than the ±0.8 % band on
 the page suggests. **Closing them is measurement work in `stdcells`, not a
 re-harden.**
+
+## M31 — the re-pin to `lib-v2.0` did not route, and it was never a placement problem. **CLOSED 2026-08-22.**
+
+Re-pinning to `lib-v2.0` (`62a3e8b`, the first library characterized from the
+EXTRACTED layout) took `gds` and `harden` red at **`[DPL-0036]` detailed
+placement failed** in `rsz_timing_postcts`, and they stayed red through three
+more commits. The re-pin itself was correct — `lib.lock` **and** `lib/` both
+moved, `verify_lib` passed.
+
+**The signal was a different REGIME, not a degradation:**
+
+| | hold WNS | hold TNS | endpoints |
+|---|---|---|---|
+| lib-v1.7 (green) | −0.096 ns | −7.652 ns | 237 |
+| lib-v2.0 (fails) | **−7.461 ns** | **−1996.785 ns** | 277 |
+
+TNS ÷ endpoints ≈ **−7.2 ns**, i.e. nearly every endpoint sitting at the worst
+value — **a uniform offset**. That is the shape of a constant added to every
+launch, and it is what should have pointed at the liberty on day one.
+
+### What it actually was
+
+`lib-v2.0`'s `DFF_X1` `cell_fall` (CLK→Q) table at `*_ff_n40C_1v95`:
+
+```
+values("-7.25779, -7.23695, -7.14883, 0.40892",   <- 15 of 20 entries
+       "-7.26613, -7.24529, -7.15716, 0.41198",      are -7.2 .. -8.5 ns
+       "-7.29113, -7.27029, -7.18216, 0.42132",
+       "-7.49946, -7.47862, -7.39049, 0.46721",
+       "-8.49946, -8.47862, -8.39049, 0.49927");
+```
+
+tt (0.250…0.802 ns) and ss (0.405…1.323 ns) were clean. **ff is the hold
+corner**, so a −7.4 ns launch arc is a −7.4 ns hold violation on essentially
+every endpoint, and hold repair chasing 7.4 ns of delay everywhere is what
+flooded the detailed placer. The `stdcells` root cause is **M31**: at ff the
+flop's operating point leaves Q at mid-rail (1.2906 V), it settles through
+VDD/2 at 0.75 ns, and the characterizer's `targ v(Q) val=VDD/2 fall=1` latched
+onto that **power-up settle** instead of the capture at 8.16 ns — an explicit
+crossing ordinal is counted from t=0, not from the trig. Only the 100 fF
+column escaped, because that load slows the settle past the threshold, which
+is why the last column is byte-identical before and after the fix.
+
+### Three things this file recorded that were wrong. They are corrected here.
+
+- ⛔ **"~7.4 ns ≈ 31 ring stages at this library's per-stage delay."** A
+  plausible, arithmetically apt hypothesis — and a **coincidence**. There was
+  never a ring path involved, `ro_clk` is still correctly absent from the P&R
+  SDC, and **no async/ring constraint should be added for this failure.**
+- ⛔ **"NOT a corrupt liberty (max table value 1.71 vs 1.70 ns)."** The check
+  was run against the **maximum**. The corruption was at the minimum.
+- ⛔ **"NOT the clock tree (CTS identical: 51 buffers, 282 sinks)."** True, and
+  it was correctly *excluding* a cause — but it was read as evidence that the
+  problem must be in placement, which is how three CI cycles went to margin and
+  density knobs. Those two remain **measured dead ends** (margin 0.030→0.020
+  moved unplaceable 599→584; density 85→65 made it 584→**674, worse**) — but
+  they were never near the cause, so they say nothing about this design.
+
+⭐ **The whole diagnosis came out of a raw ngspice log that had been sitting in
+`stdcells/out/` since the v2.0 run** — `dffq_ff_n40C_1v95_00_f.log`, which
+prints `tcq = -7.25779e-09  targ= 7.50540e-10  trig= 8.00833e-09` next to
+`Initial Transient Solution q = 1.2906`. No STA report and no CI cycle were
+needed. The lesson is narrow and worth keeping: **when a violation is uniform
+across endpoints, read the library before the floorplan.**
+
+### The fix, and its blast radius
+
+`stdcells` **`lib-v2.1`** (`9fe8382`, `harden` green). The entire library diff
+from `lib-v2.0` is **one table, fifteen numbers**: both other corners,
+`own.lib`, `own_abc.lib`, `own_hardening.lib`, `own.lef` and `own_cells.gds`
+are byte-identical, `harden/cordic_gates.v` re-synthesizes to the same md5, and
+the setup / hold / `min_pulse_width` searches re-ran from scratch and
+reproduced `lib-v2.0` exactly. **This changes what we know about the chip, not
+the chip.**
+
+Two physical guards were added in `stdcells/flow/check_monotonic.py`, which had
+passed this and was *right* to — it permits negative delay on purpose (early
+trip is real for these asymmetric cells; the worst legitimate value is −96 ps)
+and the corrupt row is still monotone in load. **(A)** a clocked cell's CLK→Q
+cannot be ≤ 0, because it is measured from the edge that causes it and early
+trip is a combinational effect; **(B)** no cell's delay may be more negative
+than one full input ramp (`slew / 0.6`). Both fire on exactly the 15 corrupt
+entries and on nothing else.
+
+🧰 **Both workflows now upload `runs/**` logs and reports on failure.** The
+existing artifact globbed `*/final`, which only exists when the flow
+**completed** — so on the one occasion the logs were wanted it was 217 bytes of
+nothing. That is what made the STA report unreadable and the guessing necessary.
 
 ## What is left, in order
 

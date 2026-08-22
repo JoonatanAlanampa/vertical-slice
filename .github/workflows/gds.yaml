@@ -152,6 +152,25 @@ jobs:
         if: success() || failure()
         run: python3 flow/check_ring_doc.py runs
 
+      # Same reason as harden.yml (defect M31): tt-gds-action's own artifact is
+      # built from a COMPLETED run, so a flow that dies in place-and-route
+      # leaves nothing to read. These are logs and reports only.
+      - name: Upload run logs when anything above FAILED
+        if: failure()
+        run: sudo chown -R "$USER" runs || true
+      - name: Upload run logs (failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gds-run-logs
+          path: |
+            runs/**/*.log
+            runs/**/*.rpt
+            runs/**/reports/**
+            runs/**/*.json
+          if-no-files-found: warn
+          retention-days: 14
+
   # The ring read-out path, simulated on the netlist that actually ships.
   #
   # WHY THIS JOB EXISTS. TinyTapeout's own `gl_test` runs the netlist at ZERO

@@ -134,6 +134,28 @@ jobs:
               f.write(out + "\n")
           EOF
 
+      # WHY THIS EXISTS (2026-08-22, defect M31). "Upload results" below globs
+      # harden/runs/*/final -- which only exists when the flow COMPLETED. When
+      # librelane dies mid-flow the artifact is a few hundred bytes of nothing,
+      # and that is exactly when the logs are wanted. lib-v2.0's [DPL-0036]
+      # failure cost three CI cycles of guessing for want of one STA report.
+      # Logs and reports only: the DEF/GDS per step would be hundreds of MB.
+      - name: Upload the run logs and reports when the flow FAILED
+        if: failure()
+        run: sudo chown -R "$USER" harden/runs || true
+      - name: Upload run logs (failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hardening-run-logs
+          path: |
+            harden/runs/**/*.log
+            harden/runs/**/*.rpt
+            harden/runs/**/reports/**
+            harden/runs/**/*.json
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@v4
