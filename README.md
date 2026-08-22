@@ -61,6 +61,84 @@ verified against a per-file checksum before anything is built.
 python test/run.py          # both suites (icarus + cocotb, no make needed)
 ```
 
+## What the die should return
+
+This is the whole point of the chip: three ring oscillators built from one cell
+flavour each, whose frequency is a direct read-out of that cell's propagation
+delay in real silicon. The numbers below are what my own model predicts, and
+they are what the first die gets held against.
+
+Counts are per **short** window (2^12 clocks at 25 MHz); multiply by 256 for the
+long window. Computed from run `32576208363` on `stdcells` **`lib-v2.2`**.
+
+| ring | ff (-40 C, 1.95 V) | tt (25 C, 1.80 V) | ss (100 C, 1.60 V) |
+|---|---|---|---|
+| INV | 486.7 MHz / 312 | **397.3 MHz / 254** | 285.2 MHz / 183 |
+| NAND2 | 353.4 MHz / 226 | **278.5 MHz / 178** | 187.9 MHz / 120 |
+| NOR2 | 253.4 MHz / 162 | **201.3 MHz / 129** | 140.2 MHz / 90 |
+
+The parasitic-extraction corner is worth about 1.5 %, so it is a band rather
+than a single number. `min`..`max` RC brackets the `nom` column above:
+
+| ring | ff min..max | tt min..max | ss min..max |
+|---|---|---|---|
+| INV | 313 .. 310 | 256 .. 253 | 183 .. 182 |
+| NAND2 | 228 .. 224 | 180 .. 177 | 121 .. 119 |
+| NOR2 | 164 .. 161 | 130 .. 127 | 90 .. 89 |
+
+And the cell delays those counts imply — the three numbers this whole project
+exists to compare against device physics:
+
+| corner | `tp_INV` | `tp_NAND2` | `tp_NOR2` |
+|---|---|---|---|
+| ff (-40 C, 1.95 V) | 32.72 ps | 45.64 ps | 63.65 ps |
+| tt (25 C, 1.80 V) | **40.02 ps** | **57.91 ps** | **80.12 ps** |
+| ss (100 C, 1.60 V) | 55.58 ps | 85.84 ps | 115.04 ps |
+
+> The INV ring is 30 inverters plus the NAND2 that gates it, so its raw period
+> is a 30:1 *blend* of two cells. `tp_INV` above is de-blended using the NAND2
+> ring, which measures that stage directly; the blend is worth
+> +1.16 % (ff) / +1.38 % (tt) / +1.62 % (ss).
+
+**None of these are typed by hand.** `flow/check_ring_doc.py` re-derives all
+nine headline figures, all eighteen band figures and all nine cell delays from
+the routed design on every CI run, and compares them against this README, the
+datasheet and the bring-up script — the three places they are published — plus
+the `ro_clk` constraint in `harden/signoff.sdc`. If the design moves and a
+table does not, the build fails. That guard exists because these numbers went
+stale twice without anyone noticing.
+
+## Signoff
+
+Nine timing corners, on the netlist that actually ships. Every metric below is
+in `tools/check_signoff.py`'s must-be-zero list, and a metric that is *missing*
+fails the build too — a check that cannot run is not a check that passed.
+
+| | |
+|---|---|
+| LVS | **match uniquely**, 7006 vs 7006 devices, 3040 nets |
+| DRC (magic + KLayout FEOL/BEOL/offgrid) | **0** |
+| antenna violations | **0** |
+| power-grid violations | **0** |
+| setup / hold violations, 9 corners | **0 / 0** |
+| max-slew / max-fanout / max-cap | **0 / 0 / 0** |
+| foundry cells in the submitted netlist and GDS | **0** |
+| TinyTapeout precheck | **pass** |
+
+Margins on `lib-v2.2` (run `32576208363`; re-derived and recorded in
+[`READINESS.md`](READINESS.md) on every library re-pin):
+
+| | worst | where |
+|---|---|---|
+| hold slack | **+54.41 ps** | bare-die build, `min_ff` |
+| setup slack | **+887.3 ps** | bare-die build |
+| `min_pulse_width` margin | **+856.7 ps** | `_4879_/CLK`, `max_ff` |
+| prescaler headroom vs its ring | **1.46x** | `ss`, the binding corner |
+
+The last row is the one to check the first silicon against: the counter
+tolerates a ring **46 % faster than predicted** at the binding corner. A
+picosecond count against a constraint I chose myself would say less.
+
 ### What is asserted on every run, and why that list is long
 
 This repo has repeatedly found checks that *ran, printed zeros, and were

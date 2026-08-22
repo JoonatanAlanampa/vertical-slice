@@ -89,9 +89,15 @@ def computed(run_dir):
     return out, text
 
 
-def doc_tables():
-    """-> (main{(pvt,ring):(mhz,count)}, band{(pvt,ring):(min,max)})."""
-    md = (ROOT / "docs" / "info.md").read_text(encoding="utf-8")
+def doc_tables(rel="docs/info.md"):
+    """-> (main{(pvt,ring):(mhz,count)}, band{(pvt,ring):(min,max)}).
+
+    Takes a path because the same tables are published in more than one place.
+    README.md carries them too as of 2026-08-22, and a second copy that nothing
+    re-derives is exactly defect M21 -- which is why it is passed through here
+    rather than trusted.
+    """
+    md = (ROOT / rel).read_text(encoding="utf-8")
     main, band = {}, {}
     for m in DOC_MAIN.finditer(md):
         ring, rest = m.group(1), m.group(2)
@@ -137,14 +143,14 @@ BRINGUP = ROOT / "bringup" / "vslice_bringup.py"
 SDC = ROOT / "harden" / "signoff.sdc"
 
 
-def doc_tp_table():
+def doc_tp_table(rel="docs/info.md"):
     """-> {(pvt, ring): ps} from the published CELL-DELAY table.
 
     Added 2026-08-21 together with the INV de-blend. It is a SECOND published
     prediction in the same file, so it gets the same treatment as the first:
     left unasserted it would have re-created M21 inside the fix for M21.
     """
-    md = (ROOT / "docs" / "info.md").read_text(encoding="utf-8")
+    md = (ROOT / rel).read_text(encoding="utf-8")
     out = {}
     for m in DOC_TP.finditer(md):
         vals = PS.findall(m.group(2))
@@ -292,6 +298,36 @@ def main() -> int:
                 bad.append(f"  {pvt:>3s}/{ring:<6s} cell delay: doc "
                            f"{doc_ps:6.2f} ps   fresh {fresh_tp[ring]:6.2f} ps")
 
+    # README.md publishes the same three tables as the datasheet. They are
+    # checked against the FRESH COMPUTATION, not against docs/info.md -- two
+    # copies agreeing with each other says nothing if both drifted together.
+    r_main, r_band = doc_tables("README.md")
+    r_tp = doc_tp_table("README.md")
+    want_n = len(RINGS) * len(PVTS)
+    for label, got_n in (("headline", len(r_main)), ("RC band", len(r_band)),
+                         ("cell-delay", len(r_tp))):
+        if got_n != want_n:
+            sys.exit(f"ERROR: parsed {got_n} {label} cells from README.md, "
+                     f"expected {want_n}. The README's published table changed "
+                     f"shape; this check would compare a subset and call it "
+                     f"agreement.")
+    for (pvt, ring), (mhz, cnt) in sorted(r_main.items()):
+        g_mhz, g_cnt = got[("nom", pvt, ring)]
+        if abs(g_mhz - mhz) > args.mhz_tol or abs(g_cnt - cnt) > args.count_tol:
+            bad.append(f"  {pvt:>3s}/{ring:<6s} README headline: doc "
+                       f"{mhz:7.1f} MHz / {cnt:4d}   fresh {g_mhz:7.1f} / {g_cnt:4d}")
+    for (pvt, ring), (lo, hi) in sorted(r_band.items()):
+        for rc, wanted in (("min", lo), ("max", hi)):
+            if abs(got[(rc, pvt, ring)][1] - wanted) > args.count_tol:
+                bad.append(f"  {pvt:>3s}/{ring:<6s} README {rc} band: doc "
+                           f"{wanted:4d}   fresh {got[(rc, pvt, ring)][1]:4d}")
+    for pvt in PVTS:
+        fresh_tp = tp_from(got, pvt)
+        for ring in RINGS:
+            if abs(fresh_tp[ring] - r_tp[(pvt, ring)]) > args.tp_tol:
+                bad.append(f"  {pvt:>3s}/{ring:<6s} README cell delay: doc "
+                           f"{r_tp[(pvt, ring)]:6.2f} ps   fresh {fresh_tp[ring]:6.2f} ps")
+
     # The SDC's ring period must be the FASTEST ring at that PVT over every RC
     # variant -- which is what the file's own comment says it is.
     sdc = sdc_ro_periods()
@@ -323,6 +359,9 @@ def main() -> int:
                        f"{lo:7.1f}..{hi:7.1f}   fresh "
                        f"{lo_want:7.1f}..{hi_want:7.1f} MHz")
 
+    print(f"README.md: {len(r_main)} headline + {2 * len(r_band)} band + "
+          f"{len(r_tp)} cell-delay numbers checked too")
+    print(f"harden/signoff.sdc: ro_clk period checked at {len(sdc)} corners")
     print(f"compared {len(main_t)} headline + {2 * len(band_t)} band + "
           f"{len(tp_t)} cell-delay numbers against a fresh computation on "
           f"{run}, plus {3 * len(RINGS)} constants in {BRINGUP.name}")
