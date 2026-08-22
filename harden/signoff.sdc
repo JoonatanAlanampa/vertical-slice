@@ -73,9 +73,9 @@ if {[info exists ::env(FALLBACK_SDC)] && [file exists $::env(FALLBACK_SDC)]} {
 # whichever ring is selected:
 #
 #     corner              INV     NAND2    NOR2   -> ro_clk period
-#     *_ff_n40C_1v95     1.36     1.71     2.76      1.358  (736 MHz)
-#     *_tt_025C_1v80     1.60     2.20     3.43      1.601  (625 MHz)
-#     *_ss_100C_1v60     2.17     3.28     4.82      2.166  (462 MHz)
+#     *_ff_n40C_1v95    1.77     2.38    3.48      1.774  (564 MHz)
+#     *_tt_025C_1v80    2.18     3.06    4.40      2.183  (458 MHz)
+#     *_ss_100C_1v60    3.12     4.59    6.36      3.116  (321 MHz)
 #
 # Each entry is the min across that PVT's nom/min/max interconnect variants,
 # so the constraint is the tightest of the group.
@@ -89,6 +89,29 @@ if {[info exists ::env(FALLBACK_SDC)] && [file exists $::env(FALLBACK_SDC)]} {
 # 47% slower than the constraint claimed. The comment here predicted exactly
 # this — "these are PREDICTIONS … Revisit" — and nobody revisited.
 #
+# ⚠️ UPDATED 2026-08-22 (M32, and it is M14 arriving a second time). The
+# previous table — 1.358 / 1.601 / 2.166 — was computed on `lib-v1.4`, and
+# `lib-v2.0` then measured the cells from the EXTRACTED LAYOUT for the first
+# time. Every release up to `lib-v1.7` had NO intra-cell parasitics at all
+# (stdcells M26): the wire BETWEEN cells was SPEF-extracted with care, the wire
+# INSIDE them did not exist. That is about +20 %, one-signed, and it lands on
+# the ring and the counter alike.
+#
+# So the old table did to `lib-v2.x` exactly what the pre-M14 table did to
+# `lib-v1.4`: it demanded that the ss counter close in 2.166 ns while the ss
+# ring, built from those same cells, physically runs at 3.116 ns. A fast-ring/
+# slow-counter pair that cannot occur in silicon — the failure mode this file
+# already names two paragraphs above. It produced ONE violating endpoint,
+# `_4886_` in the `ro_clk` group, at all three ss views and nowhere else
+# (max −0.069, nom −0.040, min −0.016 ns), which is the `timing__setup_vio__
+# count = 3` that failed run 32562513694.
+#
+# ⛔ The lesson is not "revisit this table" — that instruction was already
+# here, in these words, and was not followed. It is that the number is now
+# REGENERATED from the run rather than transcribed, together with the three
+# tables in docs/info.md and the two constants in bringup/vslice_bringup.py,
+# which all descend from the same computation.
+#
 # LOOSENING A CONSTRAINT IS NORMALLY THE SIN tools/check_signoff.py exists to
 # prevent, so the justification has to be that the OLD number was INVALID
 # rather than that the new one is convenient. It was: it came from a model we
@@ -100,18 +123,18 @@ if {[info exists ::env(FALLBACK_SDC)] && [file exists $::env(FALLBACK_SDC)]} {
 # 70 ps setup/uncertainty allowance):
 #
 #     corner    ring period   counter needs   HEADROOM
-#     ff          1.358 ns       0.890 ns      1.53x
-#     tt          1.601 ns       1.150 ns      1.39x
-#     ss          2.166 ns       1.700 ns      1.27x   <- binding
+#     ff         1.774 ns       1.159 ns      1.53x
+#     tt         2.183 ns       1.516 ns      1.44x
+#     ss         3.116 ns       2.264 ns      1.38x   <- binding
 #
 # So the instrument survives a ring up to 27% FASTER than predicted at the
 # binding corner. That ratio, not a picosecond count, is the number to check
 # against the first silicon measurement — and it is the number M6 should be
 # quoted as from now on.
 array set ro_period_by_pvt {
-    ff_n40C_1v95 1.358
-    tt_025C_1v80 1.601
-    ss_100C_1v60 2.166
+    ff_n40C_1v95 1.774
+    tt_025C_1v80 2.183
+    ss_100C_1v60 3.116
 }
 set ro_corner "<unset>"
 if {[info exists ::env(_CURRENT_CORNER_NAME)]} {
@@ -122,7 +145,7 @@ if {[info exists ::env(_CURRENT_CORNER_NAME)]} {
 # the ff entry above (M14) — it used to be 1.006, an orphan of the invalidated
 # pre-M7 model that would have re-created the same phantom ss violations the
 # moment corner detection broke.
-set ro_period 1.358
+set ro_period 1.774
 set ro_matched 0
 foreach {pvt period} [array get ro_period_by_pvt] {
     if {[string match "*$pvt*" $ro_corner]} {

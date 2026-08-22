@@ -95,9 +95,9 @@ below — this is the answer key for the three numbers the die returns):
 
 | corner | `tp_INV` | `tp_NAND2` | `tp_NOR2` |
 |---|---|---|---|
-| ff (-40 C, 1.95 V) | 21.85 ps | 27.52 ps | 44.93 ps |
-| tt (25 C, 1.80 V) | **25.67 ps** | **35.30 ps** | **55.71 ps** |
-| ss (100 C, 1.60 V) | 34.63 ps | 52.71 ps | 78.49 ps |
+| ff (-40 C, 1.95 V) | 28.45 ps | 38.70 ps | 56.69 ps |
+| tt (25 C, 1.80 V) | **34.94 ps** | **49.84 ps** | **71.59 ps** |
+| ss (100 C, 1.60 V) | 49.72 ps | 74.71 ps | 103.59 ps |
 
 Everything needed is on the die — no analog pins, no calibration, no
 instrument beyond a clock of known frequency.
@@ -110,16 +110,16 @@ low-pass (1 kOhm + 100 nF) or the TT Audio Pmod. Sweep `ui[6:0]` to walk
 the frequency table; `uo[6]` gives the scope a trigger.
 
 **What the counts should be.** Our own timing model predicts, per PVT
-corner (short window, 25 MHz clock, run `32481579140`, `lib-v1.7`;
+corner (short window, 25 MHz clock, run `32562513694`, `lib-v2.1`;
 regenerate with `python flow/ring_prediction.py --run <run-dir>`, and
 `flow/check_ring_doc.py` asserts on every CI run that this table still
 matches the design being built):
 
 | ring | ff (-40 C, 1.95 V) | tt (25 C, 1.80 V) | ss (100 C, 1.60 V) |
 |---|---|---|---|
-| INV | 732.0 MHz / 468 | **620.8 MHz / 397** | 458.0 MHz / 293 |
-| NAND2 | 586.1 MHz / 375 | **456.9 MHz / 292** | 306.0 MHz / 196 |
-| NOR2 | 359.0 MHz / 230 | **289.5 MHz / 185** | 205.5 MHz / 132 |
+| INV | 560.4 MHz / 359 | **455.4 MHz / 291** | 319.2 MHz / 204 |
+| NAND2 | 416.8 MHz / 267 | **323.6 MHz / 207** | 215.9 MHz / 138 |
+| NOR2 | 284.5 MHz / 182 | **225.3 MHz / 144** | 155.7 MHz / 100 |
 
 Multiply by 256 for the long window. A silicon reading that disagrees is
 not a bug to be fixed — it is the result this chip exists to produce, and
@@ -131,9 +131,9 @@ RC brackets it (counts per short window):
 
 | ring | ff min..max | tt min..max | ss min..max |
 |---|---|---|---|
-| INV | 471 .. 466 | 400 .. 395 | 296 .. 291 |
-| NAND2 | 379 .. 371 | 296 .. 288 | 199 .. 193 |
-| NOR2 | 233 .. 226 | 188 .. 182 | 133 .. 129 |
+| INV | 361 .. 356 | 293 .. 290 | 205 .. 203 |
+| NAND2 | 269 .. 264 | 209 .. 205 | 139 .. 137 |
+| NOR2 | 184 .. 180 | 145 .. 143 | 101 .. 99 |
 
 So a reading anywhere inside its PVT column's band is consistent with the
 model; only a miss outside all three bands is a real disagreement.

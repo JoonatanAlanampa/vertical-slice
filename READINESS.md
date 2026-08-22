@@ -62,6 +62,8 @@ understatement on the cell driving the slowest ring on this die.
 | M21 | **The published ring predictions in `docs/info.md` were computed on `lib-v1.4` and run `30934157150`, and nothing regenerates or checks them** | ✅ **CLOSED 2026-08-21** — regenerated against run `32481579140` (lib-v1.7) and now asserted on every `gds` run by `flow/check_ring_doc.py`. The wiring is the half that matters. See below |
 | — | The DFF constraints are "optimistic by an **unquantified** margin" against foundry practice (capture boundary vs degradation criterion) — standing since lib-v1.0, spanning setup, hold and `min_pulse_width` | ✅ **QUANTIFIED 2026-08-21** — at most **+4.7 ps**, and **+0.5 ps** at the corner where hold binds. Recorded, not closed by redefinition. See item 3 of "What is left" |
 | M31 | **The re-pin to `stdcells` `lib-v2.0` did not route: `gds` and `harden` both died at `[DPL-0036]`.** The cause was in the LIBERTY, not in placement — `DFF_X1` `cell_fall` at the **ff (hold) corner** held **−7.258…−8.499 ns in 15 of 20 entries** | ✅ **CLOSED 2026-08-22** — fixed at source in `stdcells` **`lib-v2.1`** and re-pinned here. The whole library diff is **one table, fifteen numbers**. See below |
+| M32 | **`harden/signoff.sdc`'s `ro_clk` period table was two library generations stale, and it is M14 arriving a second time.** It demanded the ss prescaler close in **2.166 ns** while the ss ring physically runs at **3.116 ns** — a fast-ring/slow-counter pair that cannot occur in silicon | ✅ **CLOSED 2026-08-22** — regenerated from the routed run. It was the only setup violator on the die: one endpoint, `_4886_`, at all three ss views |
+| M33 | **`flow/ring_prediction.py` hardcoded the NLDM template name `tbl44`.** `lib-v2.0` renamed it `tbl54` when the 10 ps slew row was added, so the parser silently returned ZERO tables and the prediction died with a `KeyError` three frames later | ✅ **CLOSED 2026-08-22** — the template name is now READ; the parser refuses to return a library it could not read |
 
 ✅ **UPDATED 2026-08-21: M19 AND M21 ARE CLOSED TOO, and the signoff now
 checks two things it could not check before.** The paragraph below was written
@@ -1269,6 +1271,64 @@ entries and on nothing else.
 existing artifact globbed `*/final`, which only exists when the flow
 **completed** — so on the one occasion the logs were wanted it was 217 bytes of
 nothing. That is what made the STA report unreadable and the guessing necessary.
+
+## M32 and M33 — what fixing M31 uncovered. Both **CLOSED 2026-08-22.**
+
+With placement no longer failing, the run reached checks that had not executed
+since the `lib-v2.0` re-pin. Two things were waiting there. Neither is a
+regression from M31; both had been latent since `lib-v2.0` and were simply
+unreachable behind `[DPL-0036]`.
+
+### M32 — the `ro_clk` period table was stale, and it is M14 a second time
+
+`timing__setup_vio__count = 3`, and it was **one endpoint counted once per ss
+view**: `_4879_ → _4886_`, both clocked by `ro_clk`, Path Group `ro_clk`
+(max −0.069, nom −0.040, min −0.016 ns). tt and ff had **zero** setup
+violations, and no other endpoint on the die violated anything.
+
+`harden/signoff.sdc` hardcoded the ring period per corner — 1.358 / 1.601 /
+**2.166** ns — computed on `lib-v1.4`. `lib-v2.0` characterized the cells from
+the **extracted layout** for the first time; every release up to `lib-v1.7`
+had no intra-cell parasitics at all (stdcells M26, ~+20 % one-signed). The ring
+and the counter are built from the same cells, so both slowed — but only the
+counter's requirement moved, because the ring's period was a **frozen
+transcription**. The constraint therefore demanded the ss counter close in
+2.166 ns against a ring that runs at **3.116 ns**: the fast-ring/slow-counter
+combination that cannot occur in silicon, which is precisely what M14 was.
+
+Regenerated from this run. The headroom the instrument actually has — the
+number M6 says to quote, and to hold the first die against:
+
+| corner | ring period | counter needs | headroom |
+|---|---|---|---|
+| ff | 1.774 ns | 1.159 ns | 1.53x |
+| tt | 2.183 ns | 1.516 ns | 1.44x |
+| ss | 3.116 ns | 2.264 ns | **1.38x** ← binding |
+
+⚠️ **Every published ring number moved, and they are all regenerated.** The
+rings are slower than `lib-v1.7` said — tt INV **620.8 → 455.4 MHz**, and the
+tt cell delays **25.67 → 34.94 ps** (INV), **35.30 → 49.84** (NAND2), **55.71 →
+71.59** (NOR2). ⛔ **Do not quote the old figures**; they were computed on a
+library with no intra-cell RC. `docs/info.md` (three tables),
+`bringup/vslice_bringup.py` (two constants) and this SDC all descend from ONE
+computation on run `32562513694` and are now regenerated together, because
+they drifting apart independently is what M21 and M14 both were.
+
+### M33 — the prediction script could not read the library at all
+
+`flow/ring_prediction.py`'s liberty parser matched `\(tbl44\)` literally.
+`lib-v2.0` renamed the NLDM template to `tbl54` when M27 added the 10 ps slew
+row, so the parser matched **nothing**, returned cells with empty table dicts,
+and `silicon()` died on `KeyError: 'cell_rise'` three frames away from the
+cause. It had been broken since the `lib-v2.0` re-pin and nothing noticed,
+because `check_ring_doc.py` never ran — the flow was dying in placement first.
+
+⭐ **This is the shape worth keeping**: a defect that hides *behind* another
+defect, in a checker rather than in the design, and surfaces as an exception
+that names the wrong thing. Fixed by reading the template name instead of
+assuming it — restricting to the four table NAMES is already unambiguous — and
+`parse_liberty()` now refuses to return a library in which the probe cells have
+no NLDM tables, rather than handing back an empty one.
 
 ## What is left, in order
 

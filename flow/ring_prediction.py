@@ -170,8 +170,17 @@ def parse_liberty(path):
         pins = {p.group(1): float(p.group(2)) for p in re.finditer(
             r'pin \((\w+)\) \{ direction : input; capacitance : ([\d.]+);', body)}
         tabs = {}
+        # The NLDM template name is READ, not assumed. It used to be spelled
+        # `tbl44` here, and lib-v2.0 renamed it to `tbl54` when M27 added the
+        # 10 ps slew row -- at which point this function silently parsed ZERO
+        # tables and silicon() died with a KeyError on 'cell_rise' three
+        # frames later. Nothing caught it because the gds run was failing in
+        # placement (M31) and never reached check_ring_doc.py. Restricting to
+        # the four table NAMES is already sufficient: power tables are
+        # rise_power/fall_power and constraints are rise/fall_constraint, so
+        # no other group can match.
         for tm in re.finditer(r'(cell_rise|cell_fall|rise_transition|'
-                              r'fall_transition) \(tbl44\) \{\s*'
+                              r'fall_transition) \(\w+\) \{\s*'
                               r'index_1\("([^"]+)"\);\s*index_2\("([^"]+)"\);\s*'
                               r'values\((.*?)\);', body, re.S):
             if tm.group(1) in tabs:      # first timing group is the A->Y arc
@@ -182,6 +191,17 @@ def parse_liberty(path):
                 [[float(v) for v in r.split(",")]
                  for r in re.findall(r'"([^"]+)"', tm.group(4))])
         cells[name] = {"pins": pins, "tab": tabs}
+
+    # Refuse to hand back a library nobody could read. A parser that returns
+    # empty on a format change looks exactly like a design with no timing,
+    # and the failure then surfaces somewhere that cannot explain it.
+    want = {"cell_rise", "cell_fall", "rise_transition", "fall_transition"}
+    for probe in ("INV_X1", "NAND2_X1", "NOR2_X1"):
+        got = set(cells.get(probe, {}).get("tab", {}))
+        if got != want:
+            sys.exit(f"ERROR: {Path(path).name}: parsed {sorted(got)} for "
+                     f"{probe}, expected {sorted(want)}. The liberty's NLDM "
+                     f"group shape changed and this parser did not.")
     return cells
 
 

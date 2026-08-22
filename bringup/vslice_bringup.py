@@ -96,13 +96,13 @@ ST_BUSY, ST_VALID = 0x01, 0x02
 # Before 2026-08-02 the table said 442.7 / 359.2 / 252.1 MHz, which was a
 # prediction of a DIFFERENT circuit: a stray BUF_X2 then hung off every ring
 # node (H3, fixed).
-PREDICTED_HZ = {"INV": 620.8e6, "NAND2": 456.9e6, "NOR2": 289.5e6}
+PREDICTED_HZ = {"INV": 455.4e6, "NAND2": 323.6e6, "NOR2": 225.3e6}
 
 # ff(-40C,1.95V) .. ss(100C,1.60V), same model. A part measured at room
 # temperature landing outside this is the interesting result, not an error.
-PREDICTED_BAND_HZ = {"INV": (458.0e6, 732.0e6),
-                     "NAND2": (306.0e6, 586.1e6),
-                     "NOR2": (205.5e6, 359.0e6)}
+PREDICTED_BAND_HZ = {"INV": (319.2e6, 560.4e6),
+                     "NAND2": (215.9e6, 416.8e6),
+                     "NOR2": (155.7e6, 284.5e6)}
 
 
 def ring_hz(count, clk_hz, win_bits):
