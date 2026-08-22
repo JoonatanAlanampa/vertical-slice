@@ -98,9 +98,9 @@ below — this is the answer key for the three numbers the die returns):
 
 | corner | `tp_INV` | `tp_NAND2` | `tp_NOR2` |
 |---|---|---|---|
-| ff (-40 C, 1.95 V) | 28.45 ps | 38.70 ps | 56.69 ps |
-| tt (25 C, 1.80 V) | **34.94 ps** | **49.84 ps** | **71.59 ps** |
-| ss (100 C, 1.60 V) | 49.72 ps | 74.71 ps | 103.59 ps |
+| ff (-40 C, 1.95 V) | 32.72 ps | 45.64 ps | 63.65 ps |
+| tt (25 C, 1.80 V) | **40.02 ps** | **57.91 ps** | **80.12 ps** |
+| ss (100 C, 1.60 V) | 55.58 ps | 85.84 ps | 115.04 ps |
 
 Everything needed is on the die — no analog pins, no calibration, no
 instrument beyond a clock of known frequency.
@@ -113,16 +113,16 @@ low-pass (1 kOhm + 100 nF) or the TT Audio Pmod. Sweep `ui[6:0]` to walk
 the frequency table; `uo[6]` gives the scope a trigger.
 
 **What the counts should be.** Our own timing model predicts, per PVT
-corner (short window, 25 MHz clock, run `32564385882`, `lib-v2.1`;
+corner (short window, 25 MHz clock, run `32575553535`, `lib-v2.2`;
 regenerate with `python flow/ring_prediction.py --run <run-dir>`, and
 `flow/check_ring_doc.py` asserts on every CI run that this table still
 matches the design being built):
 
 | ring | ff (-40 C, 1.95 V) | tt (25 C, 1.80 V) | ss (100 C, 1.60 V) |
 |---|---|---|---|
-| INV | 560.4 MHz / 359 | **455.4 MHz / 291** | 319.2 MHz / 204 |
-| NAND2 | 416.8 MHz / 267 | **323.6 MHz / 207** | 215.9 MHz / 138 |
-| NOR2 | 284.5 MHz / 182 | **225.3 MHz / 144** | 155.7 MHz / 100 |
+| INV | 486.7 MHz / 312 | **397.3 MHz / 254** | 285.2 MHz / 183 |
+| NAND2 | 353.4 MHz / 226 | **278.5 MHz / 178** | 187.9 MHz / 120 |
+| NOR2 | 253.4 MHz / 162 | **201.3 MHz / 129** | 140.2 MHz / 90 |
 
 Multiply by 256 for the long window. A silicon reading that disagrees is
 not a bug to be fixed — it is the result this chip exists to produce, and
@@ -134,9 +134,9 @@ RC brackets it (counts per short window):
 
 | ring | ff min..max | tt min..max | ss min..max |
 |---|---|---|---|
-| INV | 361 .. 356 | 293 .. 290 | 205 .. 203 |
-| NAND2 | 269 .. 264 | 209 .. 205 | 139 .. 137 |
-| NOR2 | 184 .. 180 | 145 .. 143 | 101 .. 99 |
+| INV | 313 .. 310 | 256 .. 253 | 183 .. 182 |
+| NAND2 | 228 .. 224 | 180 .. 177 | 121 .. 119 |
+| NOR2 | 164 .. 161 | 130 .. 127 | 90 .. 89 |
 
 So a reading anywhere inside its PVT column's band is consistent with the
 model; only a miss outside all three bands is a real disagreement.
@@ -171,7 +171,7 @@ optimistic**. What changed is the model, not the chip:
   because this library's transition tables were negative for inverting
   cells and OpenSTA clamps them (`READINESS.md` M11). ✅ **Fixed at the
   source in `stdcells` lib-v1.4**; the pin has carried that fix since
-  2026-08-04 and is now **`lib-v2.1`**. The table above solves the ring's
+  2026-08-04 and is now **`lib-v2.2`**. The table above solves the ring's
   own fixed point — each stage's input slew is the previous stage's output
   slew — which lands at **17-119 ps** depending on cell, edge and corner.
   ✅ **Since `lib-v2.0` the NLDM grid starts at 10 ps** (`stdcells` M27), so

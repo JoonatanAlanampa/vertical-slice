@@ -73,9 +73,9 @@ if {[info exists ::env(FALLBACK_SDC)] && [file exists $::env(FALLBACK_SDC)]} {
 # whichever ring is selected:
 #
 #     corner              INV     NAND2    NOR2   -> ro_clk period
-#     *_ff_n40C_1v95    1.77     2.38    3.48      1.774  (564 MHz)
-#     *_tt_025C_1v80    2.18     3.06    4.40      2.183  (458 MHz)
-#     *_ss_100C_1v60    3.12     4.59    6.36      3.116  (321 MHz)
+#     *_ff_n40C_1v95    2.04     2.81    3.91      2.044  (489 MHz)
+#     *_tt_025C_1v80    2.50     3.56    4.93      2.504  (399 MHz)
+#     *_ss_100C_1v60    3.49     5.27    7.07      3.489  (287 MHz)
 #
 # Each entry is the min across that PVT's nom/min/max interconnect variants,
 # so the constraint is the tightest of the group.
@@ -123,18 +123,18 @@ if {[info exists ::env(FALLBACK_SDC)] && [file exists $::env(FALLBACK_SDC)]} {
 # 70 ps setup/uncertainty allowance):
 #
 #     corner    ring period   counter needs   HEADROOM
-#     ff         1.774 ns       1.159 ns      1.53x
-#     tt         2.183 ns       1.516 ns      1.44x
-#     ss         3.116 ns       2.264 ns      1.38x   <- binding
+#     ff         2.044 ns       1.248 ns      1.64x
+#     tt         2.504 ns       1.622 ns      1.54x
+#     ss         3.489 ns       2.394 ns      1.46x   <- binding
 #
 # So the instrument survives a ring up to 38% FASTER than predicted at the
 # binding corner (1.38x, ss). That ratio, not a picosecond count, is the number to check
 # against the first silicon measurement — and it is the number M6 should be
 # quoted as from now on.
 array set ro_period_by_pvt {
-    ff_n40C_1v95 1.774
-    tt_025C_1v80 2.183
-    ss_100C_1v60 3.116
+    ff_n40C_1v95 2.044
+    tt_025C_1v80 2.504
+    ss_100C_1v60 3.489
 }
 set ro_corner "<unset>"
 if {[info exists ::env(_CURRENT_CORNER_NAME)]} {
@@ -145,7 +145,7 @@ if {[info exists ::env(_CURRENT_CORNER_NAME)]} {
 # the ff entry above (M14) — it used to be 1.006, an orphan of the invalidated
 # pre-M7 model that would have re-created the same phantom ss violations the
 # moment corner detection broke.
-set ro_period 1.774
+set ro_period 2.044
 set ro_matched 0
 foreach {pvt period} [array get ro_period_by_pvt] {
     if {[string match "*$pvt*" $ro_corner]} {
