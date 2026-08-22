@@ -50,7 +50,7 @@ understatement on the cell driving the slowest ring on this die.
 | M20 | The bare-die `harden` build had silently drifted from the submitted build on **four** settings, so it was never the stand-in it is supposed to be | ✅ **CLOSED 2026-08-20** — aligning them closed hold at **+30.90 ps** and made `design__core__area` **identical** (34255.4). ⚠️ `CTS_MAX_CAP` was **not** the cause; that first answer is recorded as wrong. See below |
 | — | `gds` workflow red since 2026-07-25 | ✅ **GREEN** — the linter now runs clean via `CELL_VERILOG_MODELS`, so the upstream `cat` finds its log |
 | M5 | Documented read sequence permits a torn 24-bit count | ✅ **FIXED** — doc bug only; hardware and bring-up script were already correct |
-| M6 | Prescaler in the RO clock domain has no generated-clock constraint | ✅ **CLOSED, re-measured on `lib-v2.1` 2026-08-22** — all nine views close, band **+694 .. +934 ps**; quote the **1.38x headroom** at the binding corner, not a slack figure. ⛔ The old **1.27x** and the +513..579 ps band are DEAD |
+| M6 | Prescaler in the RO clock domain has no generated-clock constraint | ✅ **CLOSED, re-measured on `lib-v2.1` 2026-08-22** — all nine views close, quote the **1.46x headroom** at the binding corner (`lib-v2.2`), not a slack figure. ⛔ Every earlier ratio is DEAD — 1.27x (lib-v1.6), 1.38x (lib-v2.1) |
 | M13 | `check_signoff.py` had **no timing entry at all** — a green run carried 5 setup violations | ✅ **CLOSED 2026-08-04** — setup/hold violation counts added; the previously-green run now fails |
 | M14 | `ro_clk` SDC period table stale (pre-M7 predictions), over-constraining 35-47% | ✅ **CLOSED 2026-08-04** — regenerated from the corrected model; that gap *was* M13's violations |
 | M7 | `ring_prediction.py` may sum cell delays only, not interconnect | ✅ **CLOSED** — the quoted prediction was **32-46% optimistic**; now computed from SPEF + a self-consistent slew, per corner |
@@ -58,12 +58,13 @@ understatement on the cell driving the slowest ring on this die.
 | M12 | 58 max-slew violations at ss, hidden by M11's clamped-to-zero slews | ✅ **CLOSED 2026-08-04** — repair could not see them (one estimated-parasitic view, no RC corners yet); fixed with repair margin, not a looser limit |
 | L8 | User-facing text quotes one PVT although `lib.lock` pins three | ✅ **FIXED** — text corrected, and the stated *reason* was wrong (see M10) |
 | M10 | Corner-aware STA was not in effect (0.2% of arcs moved between PVT views) | ✅ **FIXED** — now **98.5%**, max delta 155% |
-| M19 | **No cell in the library declares a `min_pulse_width`**, so OpenSTA's min-pulse-width check has no requirement to apply and CANNOT FAIL — however narrow the clock pulse gets. It lands on the prescaler, which is clocked DIRECTLY by the ring | ✅ **CLOSED 2026-08-21** — measured in `stdcells` **lib-v1.7** and re-pinned here; `gds` green with the check passing at all nine corners. ⛔ The **+577.9 ps** binding margin was lib-v1.7's; on `lib-v2.1` it is **+704.6 ps** at `_4880_/CLK` (low), `max_ff`, positive control still firing. See below |
+| M19 | **No cell in the library declares a `min_pulse_width`**, so OpenSTA's min-pulse-width check has no requirement to apply and CANNOT FAIL — however narrow the clock pulse gets. It lands on the prescaler, which is clocked DIRECTLY by the ring | ✅ **CLOSED 2026-08-21** — measured in `stdcells` **lib-v1.7** and re-pinned here; `gds` green with the check passing at all nine corners. ⛔ The **+577.9 ps** binding margin was lib-v1.7's; on `lib-v2.1` it is **+856.7 ps** at `_4879_/CLK` (low), `max_ff` on `lib-v2.2` (it was +704.6 on `lib-v2.1` and +577.9 on `lib-v1.7`), positive control still firing. See below |
 | M21 | **The published ring predictions in `docs/info.md` were computed on `lib-v1.4` and run `30934157150`, and nothing regenerates or checks them** | ✅ **CLOSED 2026-08-21** — regenerated against run `32481579140` (lib-v1.7) and now asserted on every `gds` run by `flow/check_ring_doc.py`. The wiring is the half that matters. See below |
 | — | The DFF constraints are "optimistic by an **unquantified** margin" against foundry practice (capture boundary vs degradation criterion) — standing since lib-v1.0, spanning setup, hold and `min_pulse_width` | ✅ **QUANTIFIED 2026-08-21** — at most **+4.7 ps**, and **+0.5 ps** at the corner where hold binds. Recorded, not closed by redefinition. See item 3 of "What is left" |
 | M31 | **The re-pin to `stdcells` `lib-v2.0` did not route: `gds` and `harden` both died at `[DPL-0036]`.** The cause was in the LIBERTY, not in placement — `DFF_X1` `cell_fall` at the **ff (hold) corner** held **−7.258…−8.499 ns in 15 of 20 entries** | ✅ **CLOSED 2026-08-22** — fixed at source in `stdcells` **`lib-v2.1`** and re-pinned here. The whole library diff is **one table, fifteen numbers**. See below |
 | M32 | **`harden/signoff.sdc`'s `ro_clk` period table was two library generations stale, and it is M14 arriving a second time.** It demanded the ss prescaler close in **2.166 ns** while the ss ring physically runs at **3.116 ns** — a fast-ring/slow-counter pair that cannot occur in silicon | ✅ **CLOSED 2026-08-22** — regenerated from the routed run. It was the only setup violator on the die: one endpoint, `_4886_`, at all three ss views |
 | M33 | **`flow/ring_prediction.py` hardcoded the NLDM template name `tbl44`.** `lib-v2.0` renamed it `tbl54` when the 10 ps slew row was added, so the parser silently returned ZERO tables and the prediction died with a `KeyError` three frames later | ✅ **CLOSED 2026-08-22** — the template name is now READ; the parser refuses to return a library it could not read |
+| M34 | **The extraction was CAPACITANCE-ONLY: every release through `lib-v2.1` had no intra-cell resistance at all.** `rthresh 0` cannot keep what a plain `extract all` never produced | ✅ **CLOSED 2026-08-22** — `lib-v2.2` extracts it. Worth **+6.2 / +15.2 / +1.3 %** of cell delay (INV/NAND2/NOR2). ⚠️ Not a pure addition: the same pass grounds the inter-node coupling, worth **−2.2 / −4.3 / −2.1 %**, so a residual one-signed bias of **2.1-4.3 %** remains — measured, against 6.2-15.2 % before. See below |
 
 ✅ **UPDATED 2026-08-21: M19 AND M21 ARE CLOSED TOO, and the signoff now
 checks two things it could not check before.** The paragraph below was written
@@ -302,9 +303,11 @@ On `lib-v2.1`:
 
 | corner | ring period | counter needs | headroom |
 |---|---|---|---|
-| ff | 1.774 ns | 1.159 ns | 1.53x |
-| tt | 2.183 ns | 1.516 ns | 1.44x |
-| ss | 3.116 ns | 2.264 ns | **1.38x** ← binding |
+| ff | 2.044 ns | 1.248 ns | 1.64x |
+| tt | 2.504 ns | 1.622 ns | 1.54x |
+| ss | 3.489 ns | 2.394 ns | **1.46x** ← binding |
+
+⛔ The `lib-v2.1` row (1.774/2.183/3.116 ns, 1.53/1.44/1.38x) is superseded.
 
 Setup slack in the `ro_clk` domain across all nine views is **+694 .. +934 ps**
 (was +513..579 on lib-v1.6). ⭐ The headroom IMPROVED even though every cell got
@@ -1332,9 +1335,11 @@ number M6 says to quote, and to hold the first die against:
 
 | corner | ring period | counter needs | headroom |
 |---|---|---|---|
-| ff | 1.774 ns | 1.159 ns | 1.53x |
-| tt | 2.183 ns | 1.516 ns | 1.44x |
-| ss | 3.116 ns | 2.264 ns | **1.38x** ← binding |
+| ff | 2.044 ns | 1.248 ns | 1.64x |
+| tt | 2.504 ns | 1.622 ns | 1.54x |
+| ss | 3.489 ns | 2.394 ns | **1.46x** ← binding |
+
+⛔ The `lib-v2.1` row (1.774/2.183/3.116 ns, 1.53/1.44/1.38x) is superseded.
 
 ⚠️ **Every published ring number moved, and they are all regenerated.** The
 rings are slower than `lib-v1.7` said — tt INV **620.8 → 455.4 MHz**, and the
@@ -1494,6 +1499,87 @@ cannot move a conclusion here, and it errs safe on the check that could.
   is second-order — but the die cannot report a quiet-supply ring frequency and
   nobody should be surprised by that in 2027.
 
+## M34 — the extraction had no resistance in it at all. **CLOSED 2026-08-22 in `lib-v2.2`, with the residual measured.**
+
+Found by the pre-payment blindspot gate and confirmed before anything was
+changed: all nine `stdcells/out/par/*.par.spice` contained **zero `R`
+devices**. `flow/parasitic/extract_par.tcl` ran a plain magic `extract all`,
+which writes no resistance network — that needs a separate `extresist` pass —
+and `rthresh 0` only sets a discard threshold, so it could not keep what was
+never extracted. Two docstrings said the opposite and are corrected. **M26 was
+half closed for four releases and read as fully closed.**
+
+### What it was worth, and why the naive number is misleading
+
+⚠️ **`extresist` is not a pure addition.** Turning it on also rewrites the
+capacitance topology: magic splits every node into `.tN`/`.nN` pieces and the
+inter-node **coupling** capacitances cannot be attributed to a piece, so they
+come back as node-to-**substrate** capacitance. Measured on `BUF_X1`,
+`A↔a_27_47#` (0.187 fF) and `A↔w_n38_261#` (0.040 fF) disappear while the
+pieces of `a_27_47` gain 0.577 fF to `VSUBS` against the 0.578 fF of coupling
+they lost. The cell keeps its capacitance and **loses its Miller**.
+
+So a two-point before/after comparison measures both changes at once.
+`stdcells/flow/parasitic/ground_coupling.py` builds the missing third point —
+capacitance-only with the coupling grounded the way `extresist` grounds it.
+At tt, at the ring's own operating point (20 ps slew, 2.5 fF):
+
+| model | INV_X1 | NAND2_X1 | NOR2_X1 |
+|---|---|---|---|
+| schematic (≤ `lib-v1.7`) | 24.86 ps | 30.57 ps | 44.57 ps |
+| coupling C, no R (`lib-v2.0`/`v2.1`) | 29.59 | 37.57 | 53.53 |
+| coupling GROUNDED, no R | 28.93 | 35.95 | 52.41 |
+| grounded + R (`lib-v2.2`) | 30.71 | 41.42 | 53.08 |
+
+* **resistance alone: +6.2 % / +15.2 % / +1.3 %** — one-signed, all slower.
+* **grounding the coupling: −2.2 % / −4.3 % / −2.1 %** — one-signed the other
+  way, and partly CANCELLING the resistance. That is why the naive two-point
+  delta reads only +3.8 / +10.2 / −0.8 % and why NOR2 appeared to get *faster*.
+
+⭐ **Why `lib-v2.2` ships anyway.** Both models are optimistic and the new one
+is optimistic by less: `lib-v2.1` omitted resistance worth **+6.2 to +15.2 %**;
+`lib-v2.2` omits Miller coupling worth **2.1 to 4.3 %**. A 2-4x reduction in a
+one-signed bias, **not an elimination**. ⛔ **Do not describe `lib-v2.2` as
+"the cell with its full intra-cell RC"** — it is full intra-cell resistance
+plus capacitance with the coupling lumped to ground. A model with both would
+need the coupling re-attached to the split nodes, which magic will not do from
+this flow; that is the remaining gap and it is now **measured**, not asserted.
+
+### What it did to the published numbers
+
+Every ring figure moved, and all four descendants were regenerated together
+from run `32575553535`:
+
+| | `lib-v2.1` | `lib-v2.2` | |
+|---|---|---|---|
+| tt INV | 455.4 MHz | **397.3 MHz** | −12.8 % |
+| tt NAND2 | 323.6 MHz | **278.5 MHz** | −13.9 % |
+| tt NOR2 | 225.3 MHz | **201.3 MHz** | −10.7 % |
+| tt `tp_INV` | 34.94 ps | **40.02 ps** | +14.5 % |
+
+The published delays move MORE than the +6.2/+15.2/+1.3 % measured at the ring
+operating point, because the routed prediction also carries the SPEF wire load
+and solves the ring's own fixed-point slew — and a slower cell settles at a
+slower fixed point.
+
+✅ **Every margin improved.** Bare die hold **+35.67 → +54.41 ps**, setup
+**+701.4 → +887.3 ps**; `min_pulse_width` binding margin **+704.6 → +856.7 ps**;
+counter headroom **1.38 → 1.46x** at the binding corner. Same reason each time:
+the ring is 31 lightly-loaded stages and the counter is not, so a slower
+library slows the ring more than it slows the requirement.
+
+### One thing this nearly cost, caught before the run
+
+`_par_subckt`'s well-node regex required a trailing `#` (`w_n38_261#`), and
+`extresist` never emits that spelling — the same well arrives as
+`w_n38_261.n0` / `.t0`. Nothing would have matched, **all 25 pfet bulks would
+have floated, ngspice would have exited 0, and the tables would have come back
+NaN after ~3.5 hours** — which is **M28 exactly, in a new spelling**. The stray
+guard would not have caught it either, because it also matched only the `#`
+form. Both are fixed and verified with a control. ⭐ The lesson is the one M28
+already taught and this repo keeps paying for: **a guard written against one
+spelling of a name is not a guard.**
+
 ## What is left, in order
 
 `gds` is green, so nothing below blocks the *mechanics* of submitting. These
@@ -1527,15 +1613,16 @@ that mean less than they look.
 
    | corner | pulse available | worst requirement | headroom | M6 counter |
    |---|---|---|---|---|
-   | ff | 887.0 ps | 182.4 ps | **4.86x** | 1.53x |
-   | tt | 1091.5 ps | 267.3 ps | **4.08x** | 1.44x |
-   | ss | 1558.0 ps | 406.5 ps | **3.83x** | **1.38x** |
+   | ff | 1022.0 ps | 165.3 ps | **6.18x** | 1.64x |
+   | tt | 1252.0 ps | 240.3 ps | **5.21x** | 1.54x |
+   | ss | 1744.5 ps | 367.2 ps | **4.75x** | **1.46x** |
 
-   The counter still binds at every corner, now by a factor of **2.8–3.2**
-   (was 3.8–4.4 — both margins grew, the counter's by less). The worst check on
-   the die remains `_4879_/CLK`/`_4880_/CLK` — the prescaler flops clocked
-   directly by the ring, i.e. exactly the pins this defect is about — and the
-   binding margin is **+704.6 ps** at `max_ff` (was +577.9 on lib-v1.7).
+   The counter still binds at every corner, by a factor of **3.3–3.8**. The
+   worst check on the die remains `_4879_/CLK` — the prescaler flop clocked
+   directly by the ring, i.e. exactly the pin this defect is about — and the
+   binding margin is **+856.7 ps** at `max_ff`.
+   ⛔ Superseded rows, do not quote: lib-v1.7 (6.72/5.60/4.87x, +577.9 ps) and
+   lib-v2.1 (4.86/4.08/3.83x, +704.6 ps).
    ⚠️ The **1.9x** that prompted the original worry came from extrapolating the
    FOUNDRY `dfxtp_1`; do not re-quote it. And the capture-boundary caveat that
    could have undermined this is measured at **1.05–1.06x** (item 3), not the
@@ -1574,9 +1661,9 @@ that mean less than they look.
    re-running them is its own ngspice characterization. The reason it does not
    gate a decision: the shift is a property of how abruptly THIS flop fails, it
    was one-signed and pessimistic, and even scaling it with the ~+20 % the
-   extracted layout added puts it under ~6 ps — against **+35.67 ps** of worst
-   hold slack, **+694 ps** of `ro_clk` setup and **+704.6 ps** of
-   `min_pulse_width` margin. It cannot flip any of the three. If a future
+   extracted layout added puts it under ~6 ps — against **+54.41 ps** of worst
+   hold slack, **+887 ps** of `ro_clk` setup and **+856.7 ps** of
+   `min_pulse_width` margin on `lib-v2.2`. It cannot flip any of the three. If a future
    session wants it closed rather than bounded, that is a stdcells
    characterization task, not a vertical-slice one.
 
